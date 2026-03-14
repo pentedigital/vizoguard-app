@@ -35,4 +35,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
 
-publish: null
+publish:
+  provider: github
+  owner: pentedigital
+  repo: vizoguard-app

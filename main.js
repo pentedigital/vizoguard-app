@@ -1,8 +1,12 @@
 const { app, BrowserWindow, ipcMain, clipboard, shell } = require("electron");
 const path = require("path");
+const fs = require("fs");
 const Store = require("electron-store");
 const LicenseManager = require("./src/license");
+const VpnManager = require("./src/vpn");
+const { ThreatChecker, ConnectionMonitor, SecurityProxy, ImmuneSystem } = require("./src/core");
 const { createTray, updateMenu, destroyTray } = require("./src/tray");
+const Updater = require("./src/updater");
 
 // Single instance lock
 if (!app.requestSingleInstanceLock()) {
@@ -13,7 +17,21 @@ if (!app.requestSingleInstanceLock()) {
 const store = new Store();
 const license = new LicenseManager(store);
 
+// Data directory for threat lists
+const dataDir = path.join(app.getPath("userData"), "data");
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+// Initialize security engine
+const threatChecker = new ThreatChecker(dataDir);
+const connectionMonitor = new ConnectionMonitor();
+const securityProxy = new SecurityProxy(threatChecker);
+const immuneSystem = new ImmuneSystem(app.isPackaged ? path.dirname(app.getPath("exe")) : __dirname);
+const vpn = new VpnManager(store);
+const updater = new Updater();
+
 let mainWindow = null;
+
+// ── Window Management ─────────────────────────
 
 function createWindow(page) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -24,13 +42,13 @@ function createWindow(page) {
 
   mainWindow = new BrowserWindow({
     width: 420,
-    height: 660,
+    height: 700,
     resizable: false,
     maximizable: false,
     fullscreenable: false,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     frame: false,
-    backgroundColor: "#0a0a0f",
+    backgroundColor: "#000000",
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -41,7 +59,6 @@ function createWindow(page) {
   mainWindow.loadFile(path.join(__dirname, "ui", page));
 
   mainWindow.on("close", (e) => {
-    // Hide to tray instead of quitting
     e.preventDefault();
     mainWindow.hide();
   });
@@ -58,20 +75,82 @@ function showPage(page) {
   }
 }
 
-// Tray callbacks
+function sendToRenderer(channel, data) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, data);
+  }
+}
+
+// ── Tray ──────────────────────────────────────
+
 const trayCallbacks = {
   showDashboard: () => showPage("dashboard.html"),
   copyVpnKey: () => {
     const vpnUrl = store.get("license.vpnAccessUrl");
     if (vpnUrl) clipboard.writeText(vpnUrl);
   },
-  quit: () => {
+  quit: async () => {
+    // Graceful shutdown
     license.stopPeriodicCheck();
+    connectionMonitor.stop();
+    immuneSystem.stop();
+    securityProxy.stop();
+    await vpn.disconnect().catch(() => {});
     destroyTray();
     mainWindow = null;
     app.exit(0);
   },
 };
+
+// ── Security Engine Events ────────────────────
+
+threatChecker.on("threat", (data) => {
+  sendToRenderer("threat:blocked", {
+    url: data.url,
+    risk: data.risk,
+    checks: data.checks,
+    total: threatChecker.threatsBlocked,
+  });
+  // Update tray tooltip with threat count
+  updateMenu(true, trayCallbacks);
+});
+
+securityProxy.on("blocked", (data) => {
+  sendToRenderer("threat:blocked", {
+    url: data.url,
+    risk: data.risk,
+    total: securityProxy.threatsBlocked,
+  });
+});
+
+connectionMonitor.on("scan", (data) => {
+  sendToRenderer("connections:update", data);
+});
+
+immuneSystem.on("alert", (data) => {
+  sendToRenderer("immune:alert", data);
+});
+
+// ── VPN Events ────────────────────────────────
+
+vpn.on("connected", () => {
+  sendToRenderer("vpn:state", { connected: true });
+  updateMenu(true, trayCallbacks);
+});
+
+vpn.on("disconnected", () => {
+  sendToRenderer("vpn:state", { connected: false });
+});
+
+vpn.on("error", (err) => {
+  sendToRenderer("vpn:error", { message: err.message });
+});
+
+// ── Updater Events ────────────────────────────
+
+updater.on("downloaded", (info) => {
+  sendToRenderer("update:ready", { version: info.version });
+});
 
 // ── IPC Handlers ──────────────────────────────
 
@@ -81,6 +160,7 @@ ipcMain.handle("license:activate", async (_event, key) => {
     showPage("dashboard.html");
     updateMenu(true, trayCallbacks);
     license.startPeriodicCheck();
+    startSecurityEngine();
     return result;
   } catch (err) {
     return { success: false, error: err.error || err.message || "Activation failed" };
@@ -91,11 +171,32 @@ ipcMain.handle("license:status", () => {
   return license.getCached();
 });
 
+ipcMain.handle("vpn:connect", async () => {
+  try {
+    await vpn.connect();
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("vpn:disconnect", async () => {
+  try {
+    await vpn.disconnect();
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("vpn:status", () => {
+  return { connected: vpn.isConnected };
+});
+
 ipcMain.handle("vpn:getKey", async () => {
   const cached = license.getCached();
   if (cached && cached.vpnAccessUrl) return { access_url: cached.vpnAccessUrl };
 
-  // Try fetching from server
   try {
     const { apiCall } = require("./src/api");
     const key = store.get("license.key");
@@ -116,6 +217,21 @@ ipcMain.handle("vpn:copyKey", () => {
   return { success: false, error: "No VPN key available" };
 });
 
+ipcMain.handle("security:stats", () => {
+  return {
+    threatsBlocked: securityProxy.threatsBlocked + threatChecker.threatsBlocked,
+    requestsScanned: securityProxy.requestsScanned,
+    activeConnections: connectionMonitor.activeConnections,
+    immuneEvents: immuneSystem.events.length,
+    proxyRunning: !!securityProxy._server,
+    vpnConnected: vpn.isConnected,
+  };
+});
+
+ipcMain.handle("update:install", () => {
+  updater.install();
+});
+
 ipcMain.handle("app:openExternal", (_event, url) => {
   const allowed = [
     "https://vizoguard.com",
@@ -127,28 +243,35 @@ ipcMain.handle("app:openExternal", (_event, url) => {
   }
 });
 
-ipcMain.handle("app:quit", () => {
-  trayCallbacks.quit();
-});
+ipcMain.handle("app:quit", () => trayCallbacks.quit());
+ipcMain.handle("app:minimize", () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize(); });
+ipcMain.handle("app:close", () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide(); });
 
-ipcMain.handle("app:minimize", () => {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize();
-});
+// ── Security Engine Start ─────────────────────
 
-ipcMain.handle("app:close", () => {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
-});
+async function startSecurityEngine() {
+  try {
+    await securityProxy.start();
+    connectionMonitor.start();
+    immuneSystem.start();
+    console.log("Security engine started");
+  } catch (e) {
+    console.error("Security engine start error:", e.message);
+  }
+}
 
-// ── License status change handler ─────────────
+// ── License Status Change ─────────────────────
 
 license.onStatusChange((status) => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send("status:changed", status);
-  }
+  sendToRenderer("status:changed", status);
 
   if (!status.valid) {
     showPage("expired.html");
     updateMenu(false, trayCallbacks);
+    securityProxy.stop();
+    connectionMonitor.stop();
+    immuneSystem.stop();
+    vpn.disconnect().catch(() => {});
   } else {
     updateMenu(true, trayCallbacks);
   }
@@ -157,7 +280,6 @@ license.onStatusChange((status) => {
 // ── App Lifecycle ─────────────────────────────
 
 app.whenReady().then(async () => {
-  // Hide dock icon on macOS (tray app)
   if (process.platform === "darwin") {
     app.dock.hide();
   }
@@ -169,13 +291,16 @@ app.whenReady().then(async () => {
     return;
   }
 
-  // Validate existing license
   const result = await license.validate();
 
   if (result.valid) {
     createWindow("dashboard.html");
     license.startPeriodicCheck();
+    await startSecurityEngine();
     updateMenu(true, trayCallbacks);
+
+    // Check for updates silently
+    setTimeout(() => updater.check(), 5000);
   } else {
     createWindow("expired.html");
     updateMenu(false, trayCallbacks);
@@ -190,12 +315,8 @@ app.on("second-instance", () => {
   }
 });
 
-app.on("window-all-closed", () => {
-  // Don't quit — keep running in tray
-});
+app.on("window-all-closed", () => {});
 
 app.on("activate", () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.show();
-  }
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
 });

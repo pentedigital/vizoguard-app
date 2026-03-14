@@ -303,6 +303,34 @@ a:hover { opacity: 0.8; }
   opacity: 1;
 }
 
+/* ── Card sub text ────────────────── */
+.card-sub {
+  font-size: 0.7rem;
+  color: var(--mist);
+}
+
+/* ── Update banner ────────────────── */
+.update-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--ice);
+  z-index: 50;
+}
+
+/* ── Red theme ────────────────────── */
+:root {
+  --red: #ff3b3b;
+}
+
 /* ── VPN Key Display ───────────────── */
 .vpn-key {
   font-family: var(--mono);
