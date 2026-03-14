@@ -29,7 +29,7 @@ function createWindow(page) {
     maximizable: false,
     fullscreenable: false,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    frame: process.platform !== "darwin",
+    frame: false,
     backgroundColor: "#0a0a0f",
     webPreferences: {
       nodeIntegration: false,
@@ -120,6 +120,7 @@ ipcMain.handle("app:openExternal", (_event, url) => {
   const allowed = [
     "https://vizoguard.com",
     "https://getoutline.org",
+    "mailto:support@vizoguard.com",
   ];
   if (allowed.some((prefix) => url.startsWith(prefix))) {
     shell.openExternal(url);
@@ -189,9 +190,8 @@ app.on("second-instance", () => {
   }
 });
 
-app.on("window-all-closed", (e) => {
+app.on("window-all-closed", () => {
   // Don't quit — keep running in tray
-  e.preventDefault();
 });
 
 app.on("activate", () => {
