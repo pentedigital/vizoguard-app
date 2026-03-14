@@ -2,6 +2,7 @@
   "name": "vizoguard",
   "version": "1.0.0",
   "description": "Vizoguard Pro — AI Security & VPN",
+  "author": "Vizoguard <support@vizoguard.com>",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
