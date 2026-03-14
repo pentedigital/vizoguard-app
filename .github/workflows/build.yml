@@ -1,0 +1,129 @@
+name: Build & Deploy Vizoguard Desktop App
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  build-mac:
+    name: Build macOS
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build macOS dmg
+        env:
+          CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run build:mac
+
+      - name: Upload dmg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-dmg
+          path: dist/*.dmg
+          retention-days: 7
+
+  build-win:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows NSIS installer
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CERTIFICATE_P12_BASE64 }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CERTIFICATE_PASSWORD }}
+        run: npm run build:win
+
+      - name: Upload exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-exe
+          path: dist/*.exe
+          retention-days: 7
+
+  deploy:
+    name: Deploy to VPS
+    needs: [build-mac, build-win]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download mac artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mac-dmg
+          path: dist/
+
+      - name: Download win artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: win-exe
+          path: dist/
+
+      - name: List built files
+        run: ls -lh dist/
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H 187.77.129.43 >> ~/.ssh/known_hosts
+
+      - name: Upload installers to VPS
+        run: |
+          DMG=$(ls dist/*.dmg | head -1)
+          EXE=$(ls dist/*.exe | head -1)
+
+          VERSION=$(echo "$DMG" | grep -oP '\d+\.\d+\.\d+' | head -1)
+          echo "Deploying version: $VERSION"
+
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "$DMG" root@187.77.129.43:/var/www/vizoguard/downloads/Vizoguard-${VERSION}.dmg
+
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "$EXE" root@187.77.129.43:/var/www/vizoguard/downloads/Vizoguard-Setup-${VERSION}.exe
+
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no root@187.77.129.43 \
+            "cd /var/www/vizoguard/downloads && \
+             ln -sf Vizoguard-${VERSION}.dmg Vizoguard-latest.dmg && \
+             ln -sf Vizoguard-Setup-${VERSION}.exe Vizoguard-Setup-latest.exe && \
+             ls -lh"
+
+      - name: Notify success
+        if: success()
+        run: |
+          echo "Vizoguard deployed to:"
+          echo "  https://vizoguard.com/downloads/Vizoguard-latest.dmg"
+          echo "  https://vizoguard.com/downloads/Vizoguard-Setup-latest.exe"
