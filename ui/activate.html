@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; script-src 'self'">
+  <title>Activate Vizoguard</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="titlebar">
+  <div class="logo">Vizo<span>guard</span></div>
+  <div class="titlebar-controls" id="controls"></div>
+</div>
+
+<div class="activate-container">
+  <div class="shield inactive">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    </svg>
+  </div>
+
+  <h1>Activate Vizoguard</h1>
+  <p>Enter your license key to get started.</p>
+
+  <div class="input-group">
+    <label>License Key</label>
+    <input type="text" id="license-input" placeholder="VIZO-XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
+  </div>
+
+  <div class="error-msg" id="error-msg"></div>
+
+  <button class="btn" id="activate-btn" onclick="activate()">Activate</button>
+
+  <p class="activate-footer">
+    Don't have a key? <a href="#" onclick="window.vizoguard.openExternal('https://vizoguard.com/#pricing')">Get one at vizoguard.com</a>
+  </p>
+</div>
+
+<script>
+  // Show window controls on Windows
+  if (window.vizoguard.platform !== 'darwin') {
+    document.getElementById('controls').innerHTML = `
+      <button class="titlebar-btn" onclick="window.vizoguard.minimize()">&#x2212;</button>
+      <button class="titlebar-btn" onclick="window.vizoguard.close()">&#x2715;</button>
+    `;
+  }
+
+  const input = document.getElementById('license-input');
+  const btn = document.getElementById('activate-btn');
+  const errorMsg = document.getElementById('error-msg');
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') activate();
+  });
+
+  async function activate() {
+    const key = input.value.trim();
+    if (!key) {
+      errorMsg.textContent = 'Please enter your license key.';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+    errorMsg.textContent = '';
+
+    const result = await window.vizoguard.activateLicense(key);
+
+    if (!result.success) {
+      errorMsg.textContent = result.error || 'Activation failed. Check your key and try again.';
+      btn.disabled = false;
+      btn.textContent = 'Activate';
+    }
+    // On success, main process navigates to dashboard
+  }
+</script>
+</body>
+</html>

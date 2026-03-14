@@ -1,0 +1,38 @@
+appId: com.vizoguard.app
+productName: Vizoguard
+copyright: "Copyright 2026 Vizoguard"
+
+directories:
+  output: dist
+
+files:
+  - "main.js"
+  - "preload.js"
+  - "src/**/*"
+  - "ui/**/*"
+  - "package.json"
+
+mac:
+  category: public.app-category.utilities
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  icon: build/icon.png
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.png
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+
+publish: null

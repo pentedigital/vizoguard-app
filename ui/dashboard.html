@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; script-src 'self'">
+  <title>Vizoguard</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<div class="titlebar">
+  <div class="logo">Vizo<span>guard</span></div>
+  <div class="titlebar-controls" id="controls"></div>
+</div>
+
+<div class="container">
+  <div class="shield active" id="shield">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      <polyline points="9 12 11 14 15 10" stroke-width="2"/>
+    </svg>
+  </div>
+
+  <div class="status-text active" id="status-text">Protected</div>
+  <div class="status-sub" id="status-sub">All systems active</div>
+
+  <!-- VPN Card -->
+  <div class="card">
+    <div class="card-label">VPN</div>
+    <div class="card-row">
+      <div class="card-value" id="vpn-status">Loading...</div>
+      <div class="btn-row">
+        <button class="btn btn-sm" id="copy-vpn-btn" onclick="copyVpnKey()">Copy Key</button>
+        <button class="btn btn-sm btn-ghost" onclick="window.vizoguard.openExternal('https://getoutline.org/get-started/')">Outline App</button>
+      </div>
+    </div>
+    <div class="vpn-key" id="vpn-key" style="display: none;"></div>
+  </div>
+
+  <!-- Threats Card -->
+  <div class="card">
+    <div class="card-label">Threats Blocked</div>
+    <div class="card-row">
+      <div class="card-value">0</div>
+      <span style="font-size: 0.7rem; color: var(--mist);">Monitoring active</span>
+    </div>
+  </div>
+
+  <!-- License Info -->
+  <div class="footer-info">
+    <p class="license-display" id="license-display"></p>
+    <p id="expires-display"></p>
+  </div>
+</div>
+
+<div class="toast" id="toast">Copied to clipboard</div>
+
+<script>
+  // Window controls for Windows
+  if (window.vizoguard.platform !== 'darwin') {
+    document.getElementById('controls').innerHTML = `
+      <button class="titlebar-btn" onclick="window.vizoguard.minimize()">&#x2212;</button>
+      <button class="titlebar-btn" onclick="window.vizoguard.close()">&#x2715;</button>
+    `;
+  }
+
+  async function init() {
+    const status = await window.vizoguard.getLicenseStatus();
+    if (!status) return;
+
+    // License info
+    document.getElementById('license-display').textContent = status.key || '';
+    if (status.expires) {
+      const exp = new Date(status.expires);
+      document.getElementById('expires-display').textContent =
+        `Expires ${exp.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    }
+
+    // VPN key
+    if (status.vpnAccessUrl) {
+      document.getElementById('vpn-status').textContent = 'Key Ready';
+      document.getElementById('vpn-key').textContent = status.vpnAccessUrl;
+      document.getElementById('vpn-key').style.display = 'block';
+    } else {
+      document.getElementById('vpn-status').textContent = 'Fetching key...';
+      const vpn = await window.vizoguard.getVpnKey();
+      if (vpn.access_url) {
+        document.getElementById('vpn-status').textContent = 'Key Ready';
+        document.getElementById('vpn-key').textContent = vpn.access_url;
+        document.getElementById('vpn-key').style.display = 'block';
+      } else {
+        document.getElementById('vpn-status').textContent = 'Not available';
+      }
+    }
+
+    // Status
+    if (status.status === 'offline') {
+      document.getElementById('status-sub').textContent = 'Offline mode — grace period active';
+    }
+  }
+
+  async function copyVpnKey() {
+    const result = await window.vizoguard.copyVpnKey();
+    if (result.success) {
+      showToast('Copied to clipboard');
+    }
+  }
+
+  function showToast(msg) {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2000);
+  }
+
+  // Listen for status changes from 24h revalidation
+  window.vizoguard.onStatusChange((status) => {
+    if (!status.valid) {
+      // Main process will navigate to expired.html
+      return;
+    }
+    document.getElementById('status-text').textContent = 'Protected';
+    document.getElementById('status-text').className = 'status-text active';
+    document.getElementById('status-sub').textContent =
+      status.status === 'offline' ? 'Offline mode — grace period active' : 'All systems active';
+  });
+
+  init();
+</script>
+</body>
+</html>
