@@ -128,16 +128,19 @@ class VpnManager extends EventEmitter {
         const addrType = request[3];
 
         if (addrType === 0x01) {
-          // IPv4
+          // IPv4 — need at least 10 bytes
+          if (request.length < 10) { client.end(); return; }
           destHost = `${request[4]}.${request[5]}.${request[6]}.${request[7]}`;
           destPort = request.readUInt16BE(8);
         } else if (addrType === 0x03) {
-          // Domain
+          // Domain — need at least 5 + domainLen + 2 bytes
           const domainLen = request[4];
+          if (request.length < 5 + domainLen + 2) { client.end(); return; }
           destHost = request.slice(5, 5 + domainLen).toString();
           destPort = request.readUInt16BE(5 + domainLen);
         } else if (addrType === 0x04) {
-          // IPv6
+          // IPv6 — need at least 22 bytes
+          if (request.length < 22) { client.end(); return; }
           destHost = Array.from(request.slice(4, 20)).map((b) => b.toString(16).padStart(2, "0")).join(":");
           destPort = request.readUInt16BE(20);
         } else {

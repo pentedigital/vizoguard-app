@@ -233,14 +233,17 @@ ipcMain.handle("update:install", () => {
 });
 
 ipcMain.handle("app:openExternal", (_event, url) => {
-  const allowed = [
-    "https://vizoguard.com",
-    "https://getoutline.org",
-    "mailto:support@vizoguard.com",
-  ];
-  if (allowed.some((prefix) => url.startsWith(prefix))) {
+  if (url === "mailto:support@vizoguard.com") {
     shell.openExternal(url);
+    return;
   }
+  try {
+    const parsed = new URL(url);
+    const allowedHosts = ["vizoguard.com", "www.vizoguard.com", "getoutline.org", "www.getoutline.org"];
+    if (parsed.protocol === "https:" && allowedHosts.includes(parsed.hostname)) {
+      shell.openExternal(url);
+    }
+  } catch {}
 });
 
 ipcMain.handle("app:quit", () => trayCallbacks.quit());
