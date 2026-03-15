@@ -108,6 +108,12 @@ class LicenseManager {
         return { valid: false, reason: "expired" };
       }
 
+      if (err.status === 403 && (err.error || "").includes("suspended")) {
+        this.store.set("license.status", "suspended");
+        this._emit({ valid: false, reason: "suspended" });
+        return { valid: false, reason: "suspended" };
+      }
+
       // Network error — check grace period
       if (this.isGracePeriodValid() && !this.isExpired()) {
         this._emit({ valid: true, status: "offline", expires: this.store.get("license.expires") });

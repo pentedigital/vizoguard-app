@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld("vizoguard", {
   onVpnState: (cb) => ipcRenderer.on("vpn:state", (_e, d) => cb(d)),
   onStatusChange: (cb) => ipcRenderer.on("status:changed", (_e, d) => cb(d)),
   onUpdateReady: (cb) => ipcRenderer.on("update:ready", (_e, d) => cb(d)),
+  onVpnError: (cb) => ipcRenderer.on("vpn:error", (_e, d) => cb(d)),
+  onSecurityError: (cb) => ipcRenderer.on("security:error", (_e, d) => cb(d)),
 
   platform: process.platform,
 });

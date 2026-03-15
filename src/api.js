@@ -15,7 +15,7 @@ function apiCall(endpoint, body) {
       headers: {
         "Content-Type": "application/json",
         "Content-Length": Buffer.byteLength(payload),
-        "User-Agent": "Vizoguard/1.0.0",
+        "User-Agent": "Vizoguard/1.1.0",
       },
     };
 
