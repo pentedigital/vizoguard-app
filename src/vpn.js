@@ -49,7 +49,13 @@ class VpnManager extends EventEmitter {
     const accessUrl = this.store.get("license.vpnAccessUrl");
     if (!accessUrl) throw new Error("No VPN access key configured");
 
-    const config = this._parseAccessUrl(accessUrl);
+    let config;
+    try {
+      config = this._parseAccessUrl(accessUrl);
+    } catch (e) {
+      throw new Error(`Invalid VPN configuration: ${e.message}`);
+    }
+
     this._remoteHost = config.host;
     this._remotePort = config.port;
     this._password = config.password;
@@ -59,7 +65,16 @@ class VpnManager extends EventEmitter {
     await this._startSocksProxy();
 
     // Set system proxy to our local SOCKS5
-    await platform.setProxy(SOCKS_HOST, SOCKS_PORT);
+    try {
+      await platform.setProxy(SOCKS_HOST, SOCKS_PORT);
+    } catch (e) {
+      // Rollback: stop SOCKS server if proxy setup fails
+      if (this._server) {
+        this._server.close();
+        this._server = null;
+      }
+      throw new Error(`Failed to set system proxy: ${e.message}`);
+    }
 
     this._connected = true;
     this.emit("connected");

@@ -28,7 +28,9 @@ class SecurityProxy extends EventEmitter {
       this._server.on("error", (err) => {
         if (err.code === "EADDRINUSE") {
           console.error(`Port ${PROXY_PORT} already in use`);
-          resolve(); // Non-fatal — another instance may be running
+          this._server = null;
+          this.emit("error", new Error(`Security proxy failed: port ${PROXY_PORT} already in use`));
+          reject(err);
         } else {
           reject(err);
         }

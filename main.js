@@ -255,12 +255,13 @@ ipcMain.handle("app:close", () => { if (mainWindow && !mainWindow.isDestroyed())
 async function startSecurityEngine() {
   try {
     await securityProxy.start();
-    connectionMonitor.start();
-    immuneSystem.start();
-    console.log("Security engine started");
   } catch (e) {
-    console.error("Security engine start error:", e.message);
+    console.error("Security proxy failed to start:", e.message);
+    sendToRenderer("security:error", { message: `Security proxy unavailable: ${e.message}` });
   }
+  connectionMonitor.start();
+  immuneSystem.start();
+  console.log("Security engine started");
 }
 
 // ── License Status Change ─────────────────────

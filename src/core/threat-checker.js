@@ -1,5 +1,4 @@
 const { EventEmitter } = require("events");
-const https = require("https");
 const crypto = require("crypto");
 const path = require("path");
 const fs = require("fs");
@@ -156,35 +155,6 @@ class ThreatChecker extends EventEmitter {
     return { risk: maxRisk, checks, hostname };
   }
 
-  // Check URL against URLhaus API
-  async checkUrlhaus(url) {
-    return new Promise((resolve) => {
-      const postData = `url=${encodeURIComponent(url)}`;
-      const req = https.request({
-        hostname: "urlhaus-api.abuse.ch",
-        path: "/v1/url/",
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "Content-Length": Buffer.byteLength(postData),
-        },
-        timeout: 5000,
-      }, (res) => {
-        let data = "";
-        res.on("data", (chunk) => (data += chunk));
-        res.on("end", () => {
-          try {
-            const result = JSON.parse(data);
-            resolve(result.query_status === "listed" ? "malware" : "clean");
-          } catch { resolve("clean"); }
-        });
-      });
-      req.on("error", () => resolve("clean"));
-      req.on("timeout", () => { req.destroy(); resolve("clean"); });
-      req.write(postData);
-      req.end();
-    });
-  }
 }
 
 module.exports = ThreatChecker;

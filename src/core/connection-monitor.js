@@ -57,6 +57,11 @@ class ConnectionMonitor extends EventEmitter {
       });
     } catch (e) {
       console.error("Connection scan error:", e.message);
+      // Emit scan with last known data so UI doesn't stall
+      this.emit("scan", {
+        active: this.activeConnections,
+        total: this.totalScanned,
+      });
     }
   }
 }

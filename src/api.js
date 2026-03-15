@@ -36,6 +36,9 @@ function apiCall(endpoint, body) {
       });
     });
 
+    req.setTimeout(15000, () => {
+      req.destroy(new Error("Request timed out"));
+    });
     req.on("error", reject);
     req.write(payload);
     req.end();

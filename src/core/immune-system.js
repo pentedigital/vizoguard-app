@@ -16,6 +16,9 @@ class ImmuneSystem extends EventEmitter {
   }
 
   start() {
+    // Clear any existing timer to prevent leaks on repeated start()
+    this.stop();
+
     // Build list of protected files
     this._protectedFiles = this._findProtectedFiles();
 

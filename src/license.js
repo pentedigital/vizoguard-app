@@ -50,6 +50,11 @@ class LicenseManager {
   }
 
   async activate(key) {
+    // Validate key format before API call
+    if (!/^VIZO-[0-9A-Fa-f]{4}(-[0-9A-Fa-f]{4}){3}$/.test(key)) {
+      throw new Error("Invalid license key format. Expected VIZO-XXXX-XXXX-XXXX-XXXX");
+    }
+
     const deviceId = await platform.getDeviceId();
 
     const result = await apiCall("/license", { key, device_id: deviceId });
