@@ -39,6 +39,11 @@
 - `npm start` — run in dev mode (see `package.json` scripts)
 - `npm run build:mac` / `npm run build:win` — build installers
 
+## Deploy
+- Push to `main` triggers GitHub Actions: build Mac DMG + Win EXE → deploy to VPS (187.77.131.31)
+- Installers served at `vizoguard.com/downloads/Vizoguard-latest.dmg` and `.exe`
+- Deploy SSH key: ed25519, stored as `VPS_SSH_PRIVATE_KEY` GitHub secret
+
 ## IPC Channels
 - `license:activate`, `license:status` — license management
 - `vpn:connect`, `vpn:disconnect`, `vpn:status`, `vpn:getKey` — VPN control
@@ -51,7 +56,6 @@
 
 ## Gotchas
 - Blocklist file at `{userData}/data/malicious-domains.txt` — loaded once at startup, never auto-updated
-- URLhaus API method exists in threat-checker.js but is never called (dead code)
 - SOCKS5 proxy has no Shadowsocks encryption — relies on Outline server handling it
 - Grace period: 7 days offline tolerance before license shows expired
 
