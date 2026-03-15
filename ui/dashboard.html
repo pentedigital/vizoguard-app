@@ -216,6 +216,15 @@
     document.getElementById('update-banner').style.display = 'flex';
   });
 
+  window.vizoguard.onVpnError((data) => {
+    showToast('VPN error: ' + data.message);
+    updateVpnUI(false);
+  });
+
+  window.vizoguard.onSecurityError((data) => {
+    showToast(data.message);
+  });
+
   // Poll stats every 10 seconds
   setInterval(async () => {
     const stats = await window.vizoguard.getSecurityStats();
