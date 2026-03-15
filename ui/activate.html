@@ -56,9 +56,13 @@
   });
 
   async function activate() {
-    const key = input.value.trim();
+    const key = input.value.trim().toUpperCase();
     if (!key) {
       errorMsg.textContent = 'Please enter your license key.';
+      return;
+    }
+    if (!/^VIZO-[0-9A-F]{4}(-[0-9A-F]{4}){3}$/.test(key)) {
+      errorMsg.textContent = 'Invalid format. Expected: VIZO-XXXX-XXXX-XXXX-XXXX';
       return;
     }
 
