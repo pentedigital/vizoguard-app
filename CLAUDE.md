@@ -54,7 +54,13 @@
 ## Testing
 - No test suite exists yet
 
+## Deploy Workaround
+- GitHub Actions SSH deploy to VPS fails (Hostinger blocks GitHub IPs)
+- Manual deploy: `gh run download <RUN_ID> --repo pentedigital/vizoguard-app -D /tmp/build && cp /tmp/build/mac-dmg/*.dmg /var/www/vizoguard/downloads/ && cp /tmp/build/win-exe/*.exe /var/www/vizoguard/downloads/`
+
 ## Gotchas
+- User-Agent in `src/api.js` is hardcoded — must update manually on version bump
+- Desktop UI uses bundled fonts (`ui/assets/style.css` with `@font-face`), not Google Fonts
 - Blocklist file at `{userData}/data/malicious-domains.txt` — loaded once at startup, never auto-updated
 - SOCKS5 proxy has no Shadowsocks encryption — relies on Outline server handling it
 - Grace period: 7 days offline tolerance before license shows expired
