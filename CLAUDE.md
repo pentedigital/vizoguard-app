@@ -41,7 +41,8 @@
 - `npm run build:mac` / `npm run build:win` — build installers
 
 ## Deploy
-- Push to `main` triggers GitHub Actions: build Mac DMG + Win EXE → deploy to VPS (187.77.131.31)
+- Push to `main` triggers GitHub Actions: builds Mac DMG + Win EXE (deploy step fails — Hostinger blocks GitHub IPs)
+- Manual deploy: `gh run download <RUN_ID> --repo pentedigital/vizoguard-app -D /tmp/build && cp /tmp/build/mac-dmg/*.dmg /var/www/vizoguard/downloads/ && cp /tmp/build/win-exe/*.exe /var/www/vizoguard/downloads/`
 - Installers served at `vizoguard.com/downloads/Vizoguard-latest.dmg` and `.exe`
 - Deploy SSH key: ed25519, stored as `VPS_SSH_PRIVATE_KEY` GitHub secret
 
