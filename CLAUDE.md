@@ -14,7 +14,7 @@
 - CI/CD: `.github/workflows/build.yml`
 
 ## App Config
-- Version: 1.1.0, appId: `com.vizoguard.app`
+- appId: `com.vizoguard.app` (version in `package.json`)
 - Window: 420x700, frameless, not resizable
 - Single-instance enforced — second launch focuses existing window
 - macOS: dock hidden, tray-only
@@ -37,6 +37,7 @@
 ## Commands
 - `npm install` — install dependencies
 - `npm start` — run in dev mode (see `package.json` scripts)
+- To test against local backend: temporarily change `API_BASE` in `src/api.js` to `http://localhost:3000/api` — **do not commit this change**
 - `npm run build:mac` / `npm run build:win` — build installers
 
 ## Deploy
@@ -54,12 +55,8 @@
 ## Testing
 - No test suite exists yet
 
-## Deploy Workaround
-- GitHub Actions SSH deploy to VPS fails (Hostinger blocks GitHub IPs)
-- Manual deploy: `gh run download <RUN_ID> --repo pentedigital/vizoguard-app -D /tmp/build && cp /tmp/build/mac-dmg/*.dmg /var/www/vizoguard/downloads/ && cp /tmp/build/win-exe/*.exe /var/www/vizoguard/downloads/`
-
 ## Gotchas
-- User-Agent in `src/api.js` is hardcoded — must update manually on version bump
+- User-Agent in `src/api.js` is hardcoded (`Vizoguard/X.X.X`) — must match version in `package.json` on every bump
 - Desktop UI uses bundled fonts (`ui/assets/style.css` with `@font-face`), not Google Fonts
 - Blocklist file at `{userData}/data/malicious-domains.txt` — loaded once at startup, never auto-updated
 - SOCKS5 proxy has no Shadowsocks encryption — relies on Outline server handling it
