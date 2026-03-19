@@ -24,7 +24,6 @@ mac:
   icon: build/icon.png
 
 win:
-  publisherName: "Vizoguard"
   target:
     - target: nsis
       arch:
