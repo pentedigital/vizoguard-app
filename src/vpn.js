@@ -1,13 +1,136 @@
 const net = require("net");
-const { execFile } = require("child_process");
+const crypto = require("crypto");
 const { EventEmitter } = require("events");
 const platform = require("./platform");
 
-// Shadowsocks client — runs a local SOCKS5 proxy that tunnels through the Outline VPS
-// Uses ss-local from shadowsocks-libev protocol (reimplemented in pure Node.js)
+// Shadowsocks AEAD client — local SOCKS5 proxy tunneling through Outline VPS
+// Implements chacha20-ietf-poly1305 and aes-256-gcm AEAD ciphers
 
 const SOCKS_PORT = 1080;
 const SOCKS_HOST = "127.0.0.1";
+
+// AEAD cipher specs
+const CIPHER_INFO = {
+  "chacha20-ietf-poly1305": { keyLen: 32, saltLen: 32, nonceLen: 12, tagLen: 16, cipher: "chacha20-poly1305" },
+  "aes-256-gcm": { keyLen: 32, saltLen: 32, nonceLen: 12, tagLen: 16, cipher: "aes-256-gcm" },
+  "aes-128-gcm": { keyLen: 16, saltLen: 16, nonceLen: 12, tagLen: 16, cipher: "aes-128-gcm" },
+};
+
+// Derive key from password using EVP_BytesToKey (Shadowsocks standard)
+function evpBytesToKey(password, keyLen) {
+  const passBuf = Buffer.from(password);
+  const parts = [];
+  let prev = Buffer.alloc(0);
+  while (Buffer.concat(parts).length < keyLen) {
+    prev = crypto.createHash("md5").update(Buffer.concat([prev, passBuf])).digest();
+    parts.push(prev);
+  }
+  return Buffer.concat(parts).slice(0, keyLen);
+}
+
+// HKDF-SHA1 subkey derivation (Shadowsocks AEAD spec)
+function hkdfSha1(key, salt, info, length) {
+  // Extract
+  const prk = crypto.createHmac("sha1", salt).update(key).digest();
+  // Expand
+  let prev = Buffer.alloc(0);
+  const output = [];
+  for (let i = 1; Buffer.concat(output).length < length; i++) {
+    prev = crypto.createHmac("sha1", prk)
+      .update(Buffer.concat([prev, Buffer.from(info), Buffer.from([i])]))
+      .digest();
+    output.push(prev);
+  }
+  return Buffer.concat(output).slice(0, length);
+}
+
+// Increment a little-endian nonce buffer
+function incrementNonce(nonce) {
+  for (let i = 0; i < nonce.length; i++) {
+    nonce[i]++;
+    if (nonce[i] !== 0) break;
+  }
+}
+
+// AEAD encrypt a single chunk: [encrypted_payload_length (2 bytes)][length_tag][encrypted_payload][payload_tag]
+function aeadEncrypt(subkey, nonce, plaintext, cipherName, tagLen) {
+  // Encrypt the 2-byte length
+  const lenBuf = Buffer.alloc(2);
+  lenBuf.writeUInt16BE(plaintext.length);
+  const lenCipher = crypto.createCipheriv(cipherName, subkey, nonce, { authTagLength: tagLen });
+  const encLen = Buffer.concat([lenCipher.update(lenBuf), lenCipher.final(), lenCipher.getAuthTag()]);
+  incrementNonce(nonce);
+
+  // Encrypt the payload
+  const payloadCipher = crypto.createCipheriv(cipherName, subkey, nonce, { authTagLength: tagLen });
+  const encPayload = Buffer.concat([payloadCipher.update(plaintext), payloadCipher.final(), payloadCipher.getAuthTag()]);
+  incrementNonce(nonce);
+
+  return Buffer.concat([encLen, encPayload]);
+}
+
+// AEAD decryptor state machine — handles streaming decryption of Shadowsocks chunks
+class AeadDecryptor {
+  constructor(subkey, cipherName, tagLen) {
+    this._subkey = subkey;
+    this._cipherName = cipherName;
+    this._tagLen = tagLen;
+    this._nonce = Buffer.alloc(12);
+    this._buffer = Buffer.alloc(0);
+    this._waitingForPayload = false;
+    this._payloadLen = 0;
+  }
+
+  // Feed encrypted data, returns array of decrypted plaintext chunks
+  update(data) {
+    this._buffer = Buffer.concat([this._buffer, data]);
+    const chunks = [];
+
+    while (true) {
+      if (!this._waitingForPayload) {
+        // Need 2 + tagLen bytes for the encrypted length
+        const lenChunkSize = 2 + this._tagLen;
+        if (this._buffer.length < lenChunkSize) break;
+
+        const encLenBuf = this._buffer.slice(0, lenChunkSize);
+        this._buffer = this._buffer.slice(lenChunkSize);
+
+        try {
+          const decipher = crypto.createDecipheriv(this._cipherName, this._subkey, this._nonce, { authTagLength: this._tagLen });
+          decipher.setAuthTag(encLenBuf.slice(2, 2 + this._tagLen));
+          const lenBuf = Buffer.concat([decipher.update(encLenBuf.slice(0, 2)), decipher.final()]);
+          this._payloadLen = lenBuf.readUInt16BE(0);
+          incrementNonce(this._nonce);
+          this._waitingForPayload = true;
+        } catch {
+          // Decryption failed — likely wrong key or corrupted stream
+          return chunks;
+        }
+      }
+
+      if (this._waitingForPayload) {
+        const payloadChunkSize = this._payloadLen + this._tagLen;
+        if (this._buffer.length < payloadChunkSize) break;
+
+        const encPayloadBuf = this._buffer.slice(0, payloadChunkSize);
+        this._buffer = this._buffer.slice(payloadChunkSize);
+
+        try {
+          const decipher = crypto.createDecipheriv(this._cipherName, this._subkey, this._nonce, { authTagLength: this._tagLen });
+          decipher.setAuthTag(encPayloadBuf.slice(this._payloadLen, this._payloadLen + this._tagLen));
+          const payload = Buffer.concat([decipher.update(encPayloadBuf.slice(0, this._payloadLen)), decipher.final()]);
+          incrementNonce(this._nonce);
+          chunks.push(payload);
+          this._waitingForPayload = false;
+        } catch {
+          return chunks;
+        }
+      }
+    }
+
+    return chunks;
+  }
+}
 
 class VpnManager extends EventEmitter {
   constructor(store) {
@@ -19,6 +142,8 @@ class VpnManager extends EventEmitter {
     this._remotePort = null;
     this._password = null;
     this._method = null;
+    this._masterKey = null;
+    this._cipherInfo = null;
   }
 
   get isConnected() {
@@ -44,6 +169,10 @@ class VpnManager extends EventEmitter {
       throw new Error("VPN host must be a public address");
     }
 
+    if (!CIPHER_INFO[method]) {
+      throw new Error(`Unsupported cipher: ${method}`);
+    }
+
     return { method, password, host, port };
   }
 
@@ -65,6 +194,8 @@ class VpnManager extends EventEmitter {
     this._remotePort = config.port;
     this._password = config.password;
     this._method = config.method;
+    this._cipherInfo = CIPHER_INFO[config.method];
+    this._masterKey = evpBytesToKey(config.password, this._cipherInfo.keyLen);
 
     // Start SOCKS5 proxy server
     await this._startSocksProxy();
@@ -169,35 +300,75 @@ class VpnManager extends EventEmitter {
         }
 
         // Connect through the Shadowsocks server
-        this._tunnelConnection(client, destHost, destPort, request);
+        this._tunnelConnection(client, destHost, destPort);
       });
     });
   }
 
-  _tunnelConnection(client, destHost, destPort, socksRequest) {
+  _tunnelConnection(client, destHost, destPort) {
+    const info = this._cipherInfo;
+
+    // Generate random salt for this connection
+    const salt = crypto.randomBytes(info.saltLen);
+
+    // Derive subkey: HKDF-SHA1(master_key, salt, "ss-subkey", key_length)
+    const subkey = hkdfSha1(this._masterKey, salt, "ss-subkey", info.keyLen);
+    const encNonce = Buffer.alloc(info.nonceLen);
+
     // Connect to the Shadowsocks server
     const remote = net.createConnection(this._remotePort, this._remoteHost, () => {
       // Build Shadowsocks address header
       const addrHeader = this._buildAddressHeader(destHost, destPort);
 
-      // TODO: Implement Shadowsocks AEAD encryption using _method and _password.
-      // Currently sends address header in plaintext — relies on Outline server's
-      // transport-level encryption. A full implementation should use chacha20-ietf-poly1305
-      // or aes-256-gcm to encrypt all data before it reaches the wire.
-      // Consider using outline-go-tun2socks or ss-local binary for proper protocol support.
-      remote.write(addrHeader);
+      // Send salt + encrypted address header as the first message
+      const encryptedHeader = aeadEncrypt(subkey, encNonce, addrHeader, info.cipher, info.tagLen);
+      remote.write(Buffer.concat([salt, encryptedHeader]));
 
       // Send SOCKS5 success response
       const reply = Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
       client.write(reply);
 
-      // Pipe data bidirectionally
-      client.pipe(remote);
-      remote.pipe(client);
+      // Encrypt client -> remote
+      client.on("data", (chunk) => {
+        // Split into max 0x3FFF byte chunks per Shadowsocks spec
+        let offset = 0;
+        while (offset < chunk.length) {
+          const size = Math.min(chunk.length - offset, 0x3FFF);
+          const encrypted = aeadEncrypt(subkey, encNonce, chunk.slice(offset, offset + size), info.cipher, info.tagLen);
+          remote.write(encrypted);
+          offset += size;
+        }
+      });
+
+      // Decrypt remote -> client
+      // Derive server's subkey from server salt (first saltLen bytes of response)
+      let serverSaltReceived = false;
+      let serverDecryptor = null;
+      let initialBuffer = Buffer.alloc(0);
+
+      remote.on("data", (chunk) => {
+        if (!serverSaltReceived) {
+          initialBuffer = Buffer.concat([initialBuffer, chunk]);
+          if (initialBuffer.length < info.saltLen) return;
+
+          const serverSalt = initialBuffer.slice(0, info.saltLen);
+          const remaining = initialBuffer.slice(info.saltLen);
+          const serverSubkey = hkdfSha1(this._masterKey, serverSalt, "ss-subkey", info.keyLen);
+          serverDecryptor = new AeadDecryptor(serverSubkey, info.cipher, info.tagLen);
+          serverSaltReceived = true;
+
+          if (remaining.length > 0) {
+            const decrypted = serverDecryptor.update(remaining);
+            for (const buf of decrypted) client.write(buf);
+          }
+        } else {
+          const decrypted = serverDecryptor.update(chunk);
+          for (const buf of decrypted) client.write(buf);
+        }
+      });
     });
 
     remote.on("error", (err) => {
-      // Sanitize error — don't expose remote host:port details
       console.error("Tunnel error:", err.message);
       client.end();
     });
@@ -223,10 +394,8 @@ class VpnManager extends EventEmitter {
       header[4] = parts[3];
       header.writeUInt16BE(port, 5);
     } else if (isIpv6) {
-      // IPv6: 1 byte type + 16 bytes address + 2 bytes port
       header = Buffer.alloc(19);
       header[0] = 0x04; // IPv6
-      // Expand and pack IPv6 address into 16 bytes
       const groups = host.split(":").map((g) => parseInt(g, 16) || 0);
       for (let i = 0; i < 8; i++) {
         header.writeUInt16BE(groups[i] || 0, 1 + i * 2);
