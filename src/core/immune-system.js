@@ -93,10 +93,11 @@ class ImmuneSystem extends EventEmitter {
         const event = { type: "modified", file: path.basename(file), time: new Date().toISOString() };
         this.events.push(event);
         this.emit("alert", event);
-        // Cap events array to prevent unbounded memory growth
-        if (this.events.length > 100) this.events = this.events.slice(-100);
       }
     }
+
+    // Cap events array to prevent unbounded memory growth (applies to all event types)
+    if (this.events.length > 100) this.events = this.events.slice(-100);
   }
 }
 

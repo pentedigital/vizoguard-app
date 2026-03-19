@@ -79,10 +79,12 @@ class AeadDecryptor {
     this._buffer = Buffer.alloc(0);
     this._waitingForPayload = false;
     this._payloadLen = 0;
+    this._failed = false;
   }
 
   // Feed encrypted data, returns array of decrypted plaintext chunks
   update(data) {
+    if (this._failed) return [];
     this._buffer = Buffer.concat([this._buffer, data]);
     const chunks = [];
 
@@ -103,7 +105,8 @@ class AeadDecryptor {
           incrementNonce(this._nonce);
           this._waitingForPayload = true;
         } catch {
-          // Decryption failed — likely wrong key or corrupted stream
+          // Decryption failed — mark as failed to prevent processing garbage data
+          this._failed = true;
           return chunks;
         }
       }

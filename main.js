@@ -7,6 +7,7 @@ const VpnManager = require("./src/vpn");
 const { ThreatChecker, ConnectionMonitor, SecurityProxy, ImmuneSystem } = require("./src/core");
 const { createTray, updateMenu, destroyTray } = require("./src/tray");
 const Updater = require("./src/updater");
+const { apiCall } = require("./src/api");
 
 // Single instance lock
 if (!app.requestSingleInstanceLock()) {
@@ -105,23 +106,14 @@ const trayCallbacks = {
 
 // ── Security Engine Events ────────────────────
 
-threatChecker.on("threat", (data) => {
-  sendToRenderer("threat:blocked", {
-    url: data.url,
-    risk: data.risk,
-    checks: data.checks,
-    total: threatChecker.threatsBlocked,
-  });
-  // Update tray tooltip with threat count
-  updateMenu(true, trayCallbacks);
-});
-
+// Single source of truth for threat events — proxy owns the count
 securityProxy.on("blocked", (data) => {
   sendToRenderer("threat:blocked", {
     url: data.url,
     risk: data.risk,
     total: securityProxy.threatsBlocked,
   });
+  updateMenu(true, trayCallbacks);
 });
 
 connectionMonitor.on("scan", (data) => {
@@ -211,9 +203,20 @@ ipcMain.handle("vpn:getKey", async () => {
   if (cached && cached.vpnAccessUrl) return { access_url: cached.vpnAccessUrl };
 
   try {
-    const { apiCall } = require("./src/api");
     const key = store.get("license.key");
     const deviceId = store.get("license.deviceId");
+
+    // Try /vpn/get first (retrieves existing key with device verification)
+    try {
+      const result = await apiCall("/vpn/get", { key, device_id: deviceId });
+      store.set("license.vpnAccessUrl", result.access_url);
+      return result;
+    } catch (getErr) {
+      // 404 = no key provisioned yet, fall through to create
+      if (getErr.httpStatus !== 404) throw getErr;
+    }
+
+    // Create a new key
     const result = await apiCall("/vpn/create", { key, device_id: deviceId });
     store.set("license.vpnAccessUrl", result.access_url);
     return result;
@@ -336,8 +339,12 @@ app.whenReady().then(async () => {
 
       // Check for updates silently
       setTimeout(() => updater.check(), 5000);
+    } else if (result.reason === "no_license") {
+      // Corrupted store — missing device ID or key, go back to activation
+      showPage("activate.html");
+      updateMenu(false, trayCallbacks);
     } else {
-      // License invalid/expired/suspended — navigate away from dashboard
+      // License expired/suspended/invalid — show expired page
       showPage("expired.html");
       updateMenu(false, trayCallbacks);
     }

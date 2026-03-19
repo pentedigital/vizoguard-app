@@ -70,7 +70,7 @@ class LicenseManager {
 
     // Provision VPN key
     try {
-      const vpn = await apiCall("/vpn/create", { key });
+      const vpn = await apiCall("/vpn/create", { key, device_id: deviceId });
       this.store.set("license.vpnAccessUrl", vpn.access_url);
     } catch (err) {
       console.error("VPN provisioning failed (non-fatal):", err.message || err.error);
@@ -102,20 +102,21 @@ class LicenseManager {
       this._emit({ valid: true, status: result.status, expires: result.expires });
       return { valid: true, status: result.status, expires: result.expires };
     } catch (err) {
-      if (err.status === 403 && (err.error || "").includes("expired")) {
+      // Check HTTP status code (httpStatus) — not err.status which is the JSON body field
+      if (err.httpStatus === 403 && err.status === "expired") {
         this.store.set("license.status", "expired");
         this._emit({ valid: false, reason: "expired" });
         return { valid: false, reason: "expired" };
       }
 
-      if (err.status === 403 && (err.error || "").includes("suspended")) {
+      if (err.httpStatus === 403 && err.status === "suspended") {
         this.store.set("license.status", "suspended");
         this._emit({ valid: false, reason: "suspended" });
         return { valid: false, reason: "suspended" };
       }
 
       // Any other 403 — treat as invalid (don't fall through to grace period)
-      if (err.status === 403) {
+      if (err.httpStatus === 403) {
         this.store.set("license.status", "invalid");
         this._emit({ valid: false, reason: "invalid" });
         return { valid: false, reason: "invalid" };

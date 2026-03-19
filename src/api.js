@@ -28,7 +28,7 @@ function apiCall(endpoint, body) {
           if (res.statusCode >= 200 && res.statusCode < 300) {
             resolve(json);
           } else {
-            reject({ status: res.statusCode, ...json });
+            reject({ httpStatus: res.statusCode, ...json });
           }
         } catch {
           reject(new Error(`HTTP ${res.statusCode}: ${data}`));
