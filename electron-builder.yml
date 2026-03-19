@@ -1,6 +1,5 @@
 appId: com.vizoguard.app
 productName: Vizoguard
-publisherName: "Vizoguard"
 copyright: "Copyright 2026 Vizoguard"
 
 directories:
@@ -25,6 +24,7 @@ mac:
   icon: build/icon.png
 
 win:
+  publisherName: "Vizoguard"
   target:
     - target: nsis
       arch:
