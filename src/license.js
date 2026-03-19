@@ -94,7 +94,7 @@ class LicenseManager {
       // Fetch VPN key if not cached
       if (!this.store.get("license.vpnAccessUrl")) {
         try {
-          const vpn = await apiCall("/vpn/get", { key });
+          const vpn = await apiCall("/vpn/get", { key, device_id: deviceId });
           this.store.set("license.vpnAccessUrl", vpn.access_url);
         } catch { /* VPN key may not exist yet */ }
       }

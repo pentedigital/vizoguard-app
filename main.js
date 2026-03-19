@@ -213,7 +213,8 @@ ipcMain.handle("vpn:getKey", async () => {
   try {
     const { apiCall } = require("./src/api");
     const key = store.get("license.key");
-    const result = await apiCall("/vpn/create", { key });
+    const deviceId = store.get("license.deviceId");
+    const result = await apiCall("/vpn/create", { key, device_id: deviceId });
     store.set("license.vpnAccessUrl", result.access_url);
     return result;
   } catch (err) {
