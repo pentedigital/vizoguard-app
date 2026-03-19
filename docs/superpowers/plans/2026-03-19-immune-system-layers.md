@@ -119,7 +119,7 @@ describe("SecurityEngine", () => {
   });
 
   afterEach(() => {
-    engine.stop();
+    if (engine) engine.stop();
   });
 
   test("register adds module to registry", () => {
@@ -179,7 +179,7 @@ describe("SecurityEngine", () => {
     engine.register("b", modB);
     await engine.start();
 
-    engine.stop();
+    if (engine) engine.stop();
 
     expect(modA.stop).toHaveBeenCalled();
     expect(modB.stop).toHaveBeenCalled();
@@ -189,7 +189,7 @@ describe("SecurityEngine", () => {
     const mod = mockModule("test");
     engine.register("test", mod);
     await engine.start();
-    engine.stop();
+    if (engine) engine.stop();
 
     const events = [];
     engine.on("test:alert", (data) => events.push(data));
@@ -289,6 +289,8 @@ git commit -m "feat: add SecurityEngine lifecycle registry"
 ---
 
 ## Task 3: Platform Functions — Credential Store
+
+> **Note:** Platform functions (`setCredential`, `getCredential`, `getNetworkInfo`) involve OS-specific shell commands that can't be reliably unit-tested in CI (no macOS Keychain or Windows DPAPI available). They are tested indirectly via mocked platform objects in the persistence and device-monitor tests. Dedicated platform integration tests should be added as a follow-up when a cross-platform test environment is available.
 
 **Files:**
 - Modify: `src/platform/darwin.js`
@@ -1306,14 +1308,18 @@ describe("PersistenceHardener", () => {
     h.stop();
   });
 
-  test("stop takes final snapshot", async () => {
+  test("stop writes config backup synchronously (no credential store call)", async () => {
     fs.writeFileSync(path.join(tmpDir, "data", "heartbeat.json"), JSON.stringify({ cleanShutdown: true }));
     await hardener.start();
 
     platform.setCredential.mockClear();
     hardener.stop();
 
-    expect(platform.setCredential).toHaveBeenCalled();
+    // stop() uses _doSyncSnapshot which skips async credential store
+    expect(platform.setCredential).not.toHaveBeenCalled();
+    // But config backup file should exist
+    const backupPath = path.join(tmpDir, "recovery", "config-backup.json");
+    expect(fs.existsSync(backupPath)).toBe(true);
   });
 });
 ```
@@ -1961,12 +1967,12 @@ engine.on("engine:module-error", (data) => {
 
 In `trayCallbacks.quit()` (before `license.stopPeriodicCheck()` at line 96), add:
 ```js
-    engine.stop();
+    if (engine) engine.stop();
 ```
 
 In `license.onStatusChange()` (after `immuneSystem.stop()` at line 279), add:
 ```js
-    engine.stop();
+    if (engine) engine.stop();
 ```
 
 - [ ] **Step 5: Add new IPC handlers**
