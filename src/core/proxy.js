@@ -91,7 +91,7 @@ class SecurityProxy extends EventEmitter {
     }
   }
 
-  async _handleConnect(req, clientSocket, head) {
+  _handleConnect(req, clientSocket, head) {
     this.requestsScanned++;
     const [hostname, portStr] = req.url.split(":");
     const port = parseInt(portStr) || 443;
@@ -110,8 +110,8 @@ class SecurityProxy extends EventEmitter {
       return;
     }
 
-    // Check the domain via async cache (same path as HTTP requests)
-    const result = await this.threatChecker.checkUrl(`https://${hostname}`);
+    // Synchronous threat check (avoids async timing issues with CONNECT tunnels)
+    const result = this.threatChecker._analyzeUrl(`https://${hostname}`);
 
     if (result.risk === "critical" || result.risk === "high") {
       this.threatsBlocked++;
