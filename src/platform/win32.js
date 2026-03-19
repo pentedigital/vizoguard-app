@@ -18,7 +18,9 @@ function getDeviceId() {
 }
 
 async function setProxy(host, port) {
-  // Set SOCKS proxy via registry
+  // Set SOCKS proxy via IE/WinInet registry. Note: this only affects IE-legacy and
+  // Chromium-based browsers. System-wide SOCKS requires `netsh winhttp set proxy`
+  // which needs admin privileges. This is a known limitation for non-admin installs.
   await execFileAsync("reg", [
     "add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
     "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "1", "/f",

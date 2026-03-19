@@ -144,7 +144,9 @@ vpn.on("disconnected", () => {
 });
 
 vpn.on("error", (err) => {
-  sendToRenderer("vpn:error", { message: err.message });
+  // Sanitize error — strip IP:port details before sending to renderer
+  const safeMsg = (err.message || "VPN error").replace(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?/g, "[redacted]");
+  sendToRenderer("vpn:error", { message: safeMsg });
 });
 
 // ── Updater Events ────────────────────────────
@@ -220,7 +222,7 @@ ipcMain.handle("vpn:copyKey", () => {
 
 ipcMain.handle("security:stats", () => {
   return {
-    threatsBlocked: securityProxy.threatsBlocked + threatChecker.threatsBlocked,
+    threatsBlocked: securityProxy.threatsBlocked, // single source of truth (proxy owns the count)
     requestsScanned: securityProxy.requestsScanned,
     activeConnections: connectionMonitor.activeConnections,
     immuneEvents: immuneSystem.events.length,
@@ -234,6 +236,7 @@ ipcMain.handle("update:install", () => {
 });
 
 ipcMain.handle("app:openExternal", (_event, url) => {
+  // Only allow exact support mailto
   if (url === "mailto:support@vizoguard.com") {
     shell.openExternal(url);
     return;

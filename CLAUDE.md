@@ -2,15 +2,17 @@
 
 ## Stack
 - Electron app (`main.js` entry, `preload.js` bridge)
-- Cross-platform: `src/platform/` — darwin.js, win32.js
-- Core modules: `src/core/` — threat-checker, immune-system, connection-monitor, proxy
+- Cross-platform: `src/platform/` — darwin.js, win32.js, index.js (auto-selects)
+- Core modules: `src/core/` — threat-checker, immune-system, connection-monitor, proxy (barrel export: `src/core/index.js`)
 - VPN client: `src/vpn.js` — Shadowsocks/Outline protocol via `ss://` URLs
 - License management: `src/license.js`
-- Auto-updater: `src/updater.js`
-- API client: `src/api.js`
+- Auto-updater: `src/updater.js` — GitHub Releases feed (HTTPS)
+- API client: `src/api.js` — all backend calls, base URL: `https://vizoguard.com/api`
+- Persistent storage: `electron-store` (user preferences, license data)
 - System tray: `src/tray.js`
 - UI: `ui/` — dashboard, activate, expired pages
 - Build config: `electron-builder.yml`
+- Entitlements: `build/entitlements.mac.plist` (macOS code signing)
 - CI/CD: `.github/workflows/build.yml`
 
 ## App Config
@@ -19,6 +21,7 @@
 - Single-instance enforced — second launch focuses existing window
 - macOS: dock hidden, tray-only
 - Publish: GitHub Releases (owner: pentedigital, repo: vizoguard-app)
+- Mac targets: DMG (x64 + arm64) | Win target: NSIS installer (x64)
 
 ## Ports
 - Security proxy: `127.0.0.1:8888` (HTTP/HTTPS filtering)
@@ -31,8 +34,11 @@
 
 ## Security Rules
 - Context isolation enforced — all renderer communication via preload.js IPC bridge
+- IPC event listeners cleaned up on page load (`removeAllListeners` before `on`) to prevent accumulation
 - VPN access URLs contain auth credentials — never log or expose
-- `openExternal` restricted to vizoguard.com and getoutline.org hostnames
+- `openExternal` restricted to vizoguard.com, getoutline.org, and exact `mailto:support@vizoguard.com`
+- CONNECT tunnel port-whitelisted to 80/443 only — loopback/private IPs blocked to prevent SSRF
+- VPN host validated on connect — rejects loopback/private IP ranges
 
 ## Commands
 - `npm install` — install dependencies
@@ -54,14 +60,25 @@
 - `app:openExternal`, `app:minimize`, `app:close` — window controls
 
 ## Testing
-- No test suite exists yet
+- Framework: jest (`npm test` for full suite, `npx jest test/core/<module>.test.js` for single module)
+- Test files: `test/core/` — mirrors `src/core/` structure
+- Hook: editing `src/core/*.js` auto-runs the matching test file
 
 ## Gotchas
 - User-Agent in `src/api.js` is hardcoded (`Vizoguard/X.X.X`) — must match version in `package.json` on every bump
-- Desktop UI uses bundled fonts (`ui/assets/style.css` with `@font-face`), not Google Fonts
+- Desktop UI loads fonts from `fonts.gstatic.com` via `@font-face` in `ui/assets/style.css` (Outfit + JetBrains Mono) — CSP allows this in all HTML files
 - Blocklist file at `{userData}/data/malicious-domains.txt` — loaded once at startup, never auto-updated
-- SOCKS5 proxy has no Shadowsocks encryption — relies on Outline server handling it
+- SOCKS5 proxy has no Shadowsocks AEAD encryption yet (TODO in `src/vpn.js`) — relies on Outline server transport encryption. Full cipher implementation needed for production security.
 - Grace period: 7 days offline tolerance before license shows expired
+- Single-instance lock: `app.requestSingleInstanceLock()` in `main.js` — second launch quits immediately and focuses existing window
+- macOS entitlements (`build/entitlements.mac.plist`) required for code signing — missing entitlements will cause notarization failure
+- `electron-store` data lives in OS-specific `userData` path — not portable between machines
+
+## Immune System v2 (Planned)
+- Design spec: `docs/superpowers/specs/2026-03-19-immune-system-layers-design.md`
+- Implementation plan: `docs/superpowers/plans/2026-03-19-immune-system-layers.md`
+- New modules: SecurityEngine (`engine.js`), Sentinel (`sentinel.js` + `sentinel-worker.js`), CanarySystem (`canary.js`), PersistenceHardener (`persistence.js`), DeviceMonitor (`device-monitor.js`)
+- New IPC channels: `device:status`, `device:trust`, `device:untrust`, `canary:alert`, `device:alert`, `persistence:restored`
 
 ## Related Repos
 - Backend/API: `pentedigital/vizoguard` (Node.js server, lives at `/root/vizoguard`)

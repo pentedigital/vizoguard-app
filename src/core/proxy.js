@@ -91,12 +91,27 @@ class SecurityProxy extends EventEmitter {
     }
   }
 
-  _handleConnect(req, clientSocket, head) {
+  async _handleConnect(req, clientSocket, head) {
     this.requestsScanned++;
-    const [hostname, port] = req.url.split(":");
+    const [hostname, portStr] = req.url.split(":");
+    const port = parseInt(portStr) || 443;
 
-    // Check the domain before allowing CONNECT tunnel
-    const result = this.threatChecker._analyzeUrl(`https://${hostname}`);
+    // Port whitelist — only allow standard HTTP/HTTPS ports to prevent SSRF
+    if (port !== 80 && port !== 443) {
+      clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      clientSocket.end();
+      return;
+    }
+
+    // Block loopback and private IP ranges
+    if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.0\.0\.0|localhost$|\[::1\])/i.test(hostname)) {
+      clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      clientSocket.end();
+      return;
+    }
+
+    // Check the domain via async cache (same path as HTTP requests)
+    const result = await this.threatChecker.checkUrl(`https://${hostname}`);
 
     if (result.risk === "critical" || result.risk === "high") {
       this.threatsBlocked++;
@@ -107,7 +122,7 @@ class SecurityProxy extends EventEmitter {
     }
 
     // Allow the tunnel
-    const serverSocket = net.createConnection(parseInt(port) || 443, hostname, () => {
+    const serverSocket = net.createConnection(port, hostname, () => {
       clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
       serverSocket.write(head);
       serverSocket.pipe(clientSocket);

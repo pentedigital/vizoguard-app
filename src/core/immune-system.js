@@ -89,12 +89,12 @@ class ImmuneSystem extends EventEmitter {
       }
 
       if (storedHash && currentHash !== storedHash) {
-        // File was modified
+        // File was modified — keep original hash so we re-alert while tampered
         const event = { type: "modified", file: path.basename(file), time: new Date().toISOString() };
         this.events.push(event);
         this.emit("alert", event);
-        // Update hash to track the new state
-        this._hashes.set(file, currentHash);
+        // Cap events array to prevent unbounded memory growth
+        if (this.events.length > 100) this.events = this.events.slice(-100);
       }
     }
   }

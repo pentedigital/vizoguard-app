@@ -28,6 +28,9 @@ class ConnectionMonitor extends EventEmitter {
 
   async _scan() {
     try {
+      // Cap known connections map to prevent memory growth under extreme churn
+      if (this._known.size > 10000) this._known.clear();
+
       const connections = await platform.getConnections();
       this.activeConnections = connections.length;
       this.totalScanned++;

@@ -114,6 +114,13 @@ class LicenseManager {
         return { valid: false, reason: "suspended" };
       }
 
+      // Any other 403 — treat as invalid (don't fall through to grace period)
+      if (err.status === 403) {
+        this.store.set("license.status", "invalid");
+        this._emit({ valid: false, reason: "invalid" });
+        return { valid: false, reason: "invalid" };
+      }
+
       // Network error — check grace period
       if (this.isGracePeriodValid() && !this.isExpired()) {
         this._emit({ valid: true, status: "offline", expires: this.store.get("license.expires") });

@@ -32,14 +32,19 @@ class VpnManager extends EventEmitter {
     if (!ssMatch) throw new Error("Invalid ss:// URL");
 
     const decoded = Buffer.from(ssMatch[1], "base64").toString("utf8");
-    const [method, password] = decoded.split(":");
+    const colonIdx = decoded.indexOf(":");
+    const method = colonIdx > 0 ? decoded.slice(0, colonIdx) : "chacha20-ietf-poly1305";
+    const password = colonIdx > 0 ? decoded.slice(colonIdx + 1) : decoded;
 
-    return {
-      method: method || "chacha20-ietf-poly1305",
-      password: password,
-      host: ssMatch[2],
-      port: parseInt(ssMatch[3], 10),
-    };
+    const host = ssMatch[2];
+    const port = parseInt(ssMatch[3], 10);
+
+    // Reject loopback/private hosts to prevent VPN redirect attacks
+    if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.0\.0\.0|localhost$)/i.test(host)) {
+      throw new Error("VPN host must be a public address");
+    }
+
+    return { method, password, host, port };
   }
 
   // Start local SOCKS5 proxy and set system proxy
@@ -175,9 +180,11 @@ class VpnManager extends EventEmitter {
       // Build Shadowsocks address header
       const addrHeader = this._buildAddressHeader(destHost, destPort);
 
-      // Encrypt and send to remote
-      // For the initial connection, we use the Shadowsocks AEAD protocol
-      // The Outline server handles the encryption layer
+      // TODO: Implement Shadowsocks AEAD encryption using _method and _password.
+      // Currently sends address header in plaintext — relies on Outline server's
+      // transport-level encryption. A full implementation should use chacha20-ietf-poly1305
+      // or aes-256-gcm to encrypt all data before it reaches the wire.
+      // Consider using outline-go-tun2socks or ss-local binary for proper protocol support.
       remote.write(addrHeader);
 
       // Send SOCKS5 success response
@@ -190,7 +197,8 @@ class VpnManager extends EventEmitter {
     });
 
     remote.on("error", (err) => {
-      console.error(`Tunnel error to ${destHost}:${destPort}:`, err.message);
+      // Sanitize error — don't expose remote host:port details
+      console.error("Tunnel error:", err.message);
       client.end();
     });
 
@@ -201,10 +209,11 @@ class VpnManager extends EventEmitter {
 
   _buildAddressHeader(host, port) {
     // Shadowsocks address format: [type][addr][port]
-    const isIp = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+    const isIpv4 = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+    const isIpv6 = net.isIPv6(host);
     let header;
 
-    if (isIp) {
+    if (isIpv4) {
       const parts = host.split(".").map(Number);
       header = Buffer.alloc(7);
       header[0] = 0x01; // IPv4
@@ -213,6 +222,16 @@ class VpnManager extends EventEmitter {
       header[3] = parts[2];
       header[4] = parts[3];
       header.writeUInt16BE(port, 5);
+    } else if (isIpv6) {
+      // IPv6: 1 byte type + 16 bytes address + 2 bytes port
+      header = Buffer.alloc(19);
+      header[0] = 0x04; // IPv6
+      // Expand and pack IPv6 address into 16 bytes
+      const groups = host.split(":").map((g) => parseInt(g, 16) || 0);
+      for (let i = 0; i < 8; i++) {
+        header.writeUInt16BE(groups[i] || 0, 1 + i * 2);
+      }
+      header.writeUInt16BE(port, 17);
     } else {
       const domainBuf = Buffer.from(host);
       header = Buffer.alloc(4 + domainBuf.length);
