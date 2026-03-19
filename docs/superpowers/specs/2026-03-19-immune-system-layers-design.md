@@ -49,6 +49,7 @@ class SecurityEngine extends EventEmitter {
 
 - Re-emits all module events with namespace prefix: `sentinel:crash-detected`, `canary:triggered`, etc.
 - Start order is enforced: Persistence Hardener → Sentinel → Canary → Device Monitor
+- **Error isolation:** `start()` wraps each module's `start()` in try/catch. If a module fails, emits `engine:module-error` with `{ name, error }` and continues starting remaining modules. A single module failure must not prevent the others from running.
 - `main.js` adds ~15 lines to create engine, register modules, and forward events
 
 ---
@@ -59,9 +60,18 @@ class SecurityEngine extends EventEmitter {
 
 ### Mechanism
 
-- Main process spawns `sentinel-worker.js` via `child_process.fork()` with `detached: true`
+- Main process spawns `sentinel-worker.js` via `child_process.spawn()` with `ELECTRON_RUN_AS_NODE=1`:
+  ```js
+  child_process.spawn(process.execPath, [workerPath], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    detached: true,
+    stdio: ['ignore', sentinelLogFd, sentinelLogFd, 'ipc']
+  });
+  ```
+  **Why not `fork()`:** In a packaged Electron app, `process.execPath` is the Electron binary, not Node. `fork()` would try to initialize Electron in the worker. `ELECTRON_RUN_AS_NODE=1` makes it behave as plain Node.
 - Main process writes heartbeat timestamp to `{userData}/data/heartbeat.json` every 10 seconds
 - Worker reads heartbeat every 15 seconds. If timestamp is >30s stale AND parent PID is not running → crash detected
+- Worker writes operational logs to `{userData}/data/sentinel.log` (max 1MB, truncated on start) since detached process stdout is not captured by the parent
 
 ### On Crash Detection
 
@@ -81,15 +91,19 @@ class SecurityEngine extends EventEmitter {
 ```
 class Sentinel extends EventEmitter {
   constructor(appPath, userDataPath)
-  start()                // forks sentinel-worker.js, starts heartbeat writes
+  start()                // spawns sentinel-worker.js, starts heartbeat writes
   stop()                 // sends shutdown message to worker, stops heartbeat
-  wasCleanShutdown()     // reads heartbeat file, returns boolean
+  wasCleanShutdown()     // pure file read from heartbeat.json — works without start(), no Sentinel instance needed
 }
 ```
 
-**Events:** `started`, `crash-detected`, `relaunch-attempted`
+**Events:** `started`, `crash-detected`, `relaunch-attempted`, `worker-error`, `worker-restarted`
 
-**Permissions:** None required. `fork()` + `detached: true` is standard Node.js.
+**Worker failure handling:** Main process listens to the child's `exit` and `error` events. If the worker dies unexpectedly, emits `worker-error` and attempts respawn with exponential backoff (1s, 2s, 4s, max 3 retries). After 3 failed respawns, emits `worker-error` with `{ fatal: true }` and stops retrying.
+
+**Permissions:** None required. `spawn()` + `detached: true` + `ELECTRON_RUN_AS_NODE=1` is standard Electron.
+
+**Note:** `wasCleanShutdown()` is a pure file read from `{userData}/data/heartbeat.json`. It does not require the Sentinel module to be started. This allows Persistence Hardener to call it during its own `start()` before Sentinel is initialized.
 
 ---
 
@@ -105,6 +119,7 @@ class Sentinel extends EventEmitter {
   - `~/Downloads/.vizoguard-canary`
 - Each file contains random content generated once. SHA-256 hash stored in electron-store.
 - Uses `fs.watch()` for real-time filesystem notifications (not polling)
+- **Debounce/verification:** When `fs.watch()` fires, wait 500ms, then re-hash the file and compare against stored hash before emitting `triggered`. This eliminates false positives from duplicate OS events (`fs.watch()` is known to fire multiple events for a single change on both macOS and Windows).
 
 ### Detection Triggers
 
@@ -138,6 +153,8 @@ class CanarySystem extends EventEmitter {
 - macOS Spotlight / Windows Search: read-only on hidden dotfiles — no false positive
 - Antivirus: reads but doesn't modify — no false positive
 - User manual deletion: unlikely (dotfile), triggers alert + recreation
+- `fs.watch()` duplicate events: handled by 500ms debounce + hash re-verification (see Mechanism)
+- Linux is out of scope for this spec (app targets macOS and Windows only per `electron-builder.yml`)
 
 ---
 
@@ -172,8 +189,8 @@ class CanarySystem extends EventEmitter {
 
 No npm dependency — shell out to OS tools (same pattern as `src/platform/`):
 
-- **macOS:** Keychain via `security` CLI (`find-generic-password` / `add-generic-password`)
-- **Windows:** Credential Manager via `cmdkey` CLI
+- **macOS:** Keychain via `security` CLI (`find-generic-password` / `add-generic-password`), invoked via `execFile()` (not `exec()`) to prevent shell injection
+- **Windows:** DPAPI via PowerShell `[System.Security.Cryptography.ProtectedData]` — encrypts to the current user's profile. Invoked via `execFile('powershell', [...])`. **Why not `cmdkey`:** `cmdkey` is designed for network credentials with length limits and no clean retrieval CLI. VPN access URLs (`ss://` URIs) can exceed those limits. DPAPI provides proper encryption-at-rest without size constraints.
 - Service name: `com.vizoguard.app`
 - Account names: `license-key`, `vpn-access-url`
 
@@ -194,7 +211,7 @@ class PersistenceHardener extends EventEmitter {
 
 ### Integration with Sentinel
 
-On startup, checks `sentinel.wasCleanShutdown()`. If false → full validation + restore. If true → fresh snapshot only.
+On startup, reads `{userData}/data/heartbeat.json` directly (pure file read, no Sentinel instance needed) to check `cleanShutdown` flag. If false → full validation + restore. If true → fresh snapshot only. This avoids a circular dependency since Persistence Hardener starts before Sentinel.
 
 ---
 
@@ -205,14 +222,14 @@ On startup, checks `sentinel.wasCleanShutdown()`. If false → full validation +
 ### Mechanism
 
 - Polls current network info every 30 seconds via platform commands:
-  - **macOS:** `networksetup -getairportnetwork en0` (SSID) + `ifconfig en0` (gateway/IP)
+  - **macOS:** `system_profiler SPAirPortDataType -json` (SSID, reliably interface-agnostic) + `ifconfig` (gateway/IP). **Why not `networksetup -getairportnetwork en0`:** The `en0` assumption fails on Macs with USB-C Ethernet or multiple interfaces, and airport commands are deprecated on macOS Sonoma+.
   - **Windows:** `netsh wlan show interfaces` (SSID, signal, auth) + `ipconfig` (gateway)
-- Network fingerprint: `SHA-256(SSID + gateway IP + subnet)` — uniquely identifies a network without storing raw name
+- Network fingerprint: `SHA-256(SSID + gateway IP + subnet)` — uniquely identifies a network without storing raw name. For wired connections (no SSID), fingerprint uses gateway + subnet only.
 - Compares against trust list in electron-store
 
 ### Trust Model
 
-- First network seen after activation: auto-trusted (likely home network)
+- First network seen after activation: emits `first-network` event so the UI can prompt the user to confirm trust (avoids silently trusting a public network if the user activates at a coffee shop)
 - New unknown networks: emit `untrusted-network` event
 - User trusts/untrusts via IPC from dashboard
 - Trust list in electron-store: `{ hash, label, trustedAt }` — label is user-provided ("Home", "Office")
@@ -236,12 +253,12 @@ class DeviceMonitor extends EventEmitter {
 }
 ```
 
-**Events:** `started`, `network-changed`, `untrusted-network`, `trusted-network`
+**Events:** `started`, `network-changed`, `untrusted-network`, `trusted-network`, `first-network`
 
 ### New Platform Functions
 
 Added to `src/platform/darwin.js` and `win32.js`:
-- `getNetworkInfo()` — returns `{ ssid, gateway, subnet }` or `null` if wired/disconnected
+- `getNetworkInfo()` — returns `{ ssid, gateway, subnet }`. `ssid` is `null` for wired connections; `gateway` and `subnet` are always present when connected. Returns `null` only if fully disconnected.
 
 ---
 
@@ -278,14 +295,14 @@ engine.start();
 ### Shutdown
 
 In `trayCallbacks.quit()`: call `engine.stop()` before existing shutdown sequence.
-In `license.onStatusChange()` when invalid: call `engine.stop()`.
+In `license.onStatusChange()` when invalid: call `engine.stop()` **alongside** the existing `securityProxy.stop()`, `connectionMonitor.stop()`, `immuneSystem.stop()` calls — not as a replacement. The existing modules are not registered in the engine, so both systems must be stopped explicitly.
 
 ### New IPC Channels
 
 - `device:status` — current network info + trust state
 - `device:trust` — trust current network (with label)
 - `device:untrust` — remove current network from trust list
-- `security:stats` — updated to include canary and device monitor data
+- `security:stats` — updated return shape adds: `canaryActive: bool`, `canaryEvents: number`, `networkTrusted: bool`, `currentNetwork: string|null`
 
 ### Updated Exports (`src/core/index.js`)
 
@@ -297,6 +314,16 @@ Add: `SecurityEngine`, `Sentinel`, `CanarySystem`, `PersistenceHardener`, `Devic
 - `setCredential(service, account, value)` — store in OS credential manager
 - `getCredential(service, account)` — retrieve from OS credential manager
 - `deleteCredential(service, account)` — remove from OS credential manager
+
+### Preload Bridge Updates (`preload.js`)
+
+New IPC methods to expose via contextBridge (required for context-isolated renderer):
+- `window.vizoguard.getDeviceStatus()` → `ipcRenderer.invoke('device:status')`
+- `window.vizoguard.trustNetwork(label)` → `ipcRenderer.invoke('device:trust', label)`
+- `window.vizoguard.untrustNetwork()` → `ipcRenderer.invoke('device:untrust')`
+- `window.vizoguard.onCanaryAlert(cb)` → `ipcRenderer.on('canary:alert', cb)`
+- `window.vizoguard.onDeviceAlert(cb)` → `ipcRenderer.on('device:alert', cb)`
+- `window.vizoguard.onPersistenceRestored(cb)` → `ipcRenderer.on('persistence:restored', cb)`
 
 ### No UI Changes
 
@@ -323,3 +350,4 @@ Dashboard already displays immune events. New events flow through the same IPC p
 | `src/platform/darwin.js` | Add `getNetworkInfo()`, credential store functions |
 | `src/platform/win32.js` | Add `getNetworkInfo()`, credential store functions |
 | `main.js` | ~15 lines: create engine, register modules, forward events, new IPC handlers |
+| `preload.js` | Add new IPC bridge methods for device, canary, and persistence channels |
