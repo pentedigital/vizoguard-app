@@ -68,11 +68,13 @@
 - User-Agent in `src/api.js` is hardcoded (`Vizoguard/X.X.X`) — must match version in `package.json` on every bump
 - Desktop UI loads fonts from `fonts.gstatic.com` via `@font-face` in `ui/assets/style.css` (Outfit + JetBrains Mono) — CSP allows this in all HTML files
 - Blocklist file at `{userData}/data/malicious-domains.txt` — loaded once at startup, never auto-updated
-- SOCKS5 proxy has no Shadowsocks AEAD encryption yet (TODO in `src/vpn.js`) — relies on Outline server transport encryption. Full cipher implementation needed for production security.
+- SOCKS5 VPN tunnel uses Shadowsocks AEAD encryption (chacha20-ietf-poly1305) — implemented in `src/vpn.js` with Node.js crypto. Supports aes-256-gcm and aes-128-gcm as well.
 - Grace period: 7 days offline tolerance before license shows expired
 - Single-instance lock: `app.requestSingleInstanceLock()` in `main.js` — second launch quits immediately and focuses existing window
 - macOS entitlements (`build/entitlements.mac.plist`) required for code signing — missing entitlements will cause notarization failure
 - `electron-store` data lives in OS-specific `userData` path — not portable between machines
+- `src/api.js` rejects with `{ httpStatus, ...json }` — use `err.httpStatus` for HTTP code (not `err.status` which is the JSON body's status field like "expired"/"suspended")
+- `vpn:getKey` IPC tries `/vpn/get` first (with device_id), falls back to `/vpn/create` on 404 — both require `device_id` in params
 
 ## Immune System v2 (Planned)
 - Design spec: `docs/superpowers/specs/2026-03-19-immune-system-layers-design.md`
