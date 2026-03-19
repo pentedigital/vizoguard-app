@@ -31,6 +31,11 @@
 
   <div class="error-msg" id="error-msg"></div>
 
+  <div class="success-state" id="success-state" style="display: none; text-align: center;">
+    <div style="font-size: 48px; color: var(--accent); margin-bottom: 12px;">&#x2713;</div>
+    <div style="font-size: 18px; font-weight: 600; color: var(--accent);">Activated!</div>
+  </div>
+
   <button class="btn" id="activate-btn" onclick="activate()">Activate</button>
 
   <p class="activate-footer">
@@ -67,7 +72,7 @@
     }
 
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span>';
+    btn.textContent = 'Activating...';
     errorMsg.textContent = '';
 
     const result = await window.vizoguard.activateLicense(key);
@@ -76,8 +81,18 @@
       errorMsg.textContent = result.error || 'Activation failed. Check your key and try again.';
       btn.disabled = false;
       btn.textContent = 'Activate';
+      return;
     }
-    // On success, main process navigates to dashboard
+
+    // Success — show checkmark, then navigate to dashboard
+    btn.style.display = 'none';
+    document.querySelector('.input-group').style.display = 'none';
+    document.querySelector('.activate-footer').style.display = 'none';
+    document.getElementById('success-state').style.display = '';
+
+    setTimeout(function() {
+      window.vizoguard.showDashboard().catch(function() {});
+    }, 1000);
   }
 </script>
 </body>

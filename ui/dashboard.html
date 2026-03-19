@@ -6,16 +6,37 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'">
   <title>Vizoguard</title>
   <link rel="stylesheet" href="assets/style.css">
+  <style>
+    .toast.critical {
+      border-left: 4px solid var(--red, #ff3b3b);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .toast .toast-dismiss {
+      background: none;
+      border: none;
+      color: #999;
+      font-size: 18px;
+      cursor: pointer;
+      padding: 0 0 0 12px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .toast .toast-dismiss:hover {
+      color: #fff;
+    }
+  </style>
 </head>
 <body>
 
 <div class="titlebar">
   <div class="logo">Vizo<span>guard</span></div>
+  <button class="titlebar-btn" id="gear-btn" onclick="toggleSettings()" style="font-size: 16px; opacity: 0.6;">&#x2699;</button>
   <div class="titlebar-controls" id="controls"></div>
 </div>
 
 <div class="container">
-  <!-- Shield + Status -->
   <div class="shield active" id="shield">
     <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
@@ -26,7 +47,6 @@
   <div class="status-text active" id="status-text">Protected</div>
   <div class="status-sub" id="status-sub">All systems active</div>
 
-  <!-- VPN Card -->
   <div class="card">
     <div class="card-label">VPN</div>
     <div class="card-row">
@@ -35,7 +55,6 @@
     </div>
   </div>
 
-  <!-- Threats Card -->
   <div class="card">
     <div class="card-label">Threats Blocked</div>
     <div class="card-row">
@@ -44,7 +63,6 @@
     </div>
   </div>
 
-  <!-- Connections Card -->
   <div class="card">
     <div class="card-label">Active Connections</div>
     <div class="card-row">
@@ -53,61 +71,74 @@
     </div>
   </div>
 
-  <!-- License Info -->
   <div class="footer-info">
     <p class="license-display" id="license-display"></p>
     <p id="expires-display"></p>
   </div>
 </div>
 
-<!-- Update banner -->
 <div class="update-banner" id="update-banner" style="display: none;">
   <span>Update available</span>
   <button class="btn btn-sm" onclick="window.vizoguard.installUpdate()">Restart to update</button>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast"><span id="toast-msg"></span><button class="toast-dismiss" id="toast-dismiss" style="display:none;" onclick="dismissToast()">&times;</button></div>
+
+<div id="settings-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:100;" onclick="toggleSettings()"></div>
+<div id="settings-panel" style="display:none; position:fixed; top:40px; right:0; bottom:0; width:280px; background:#0d0d14; border-left:1px solid #1a2235; z-index:101; padding:24px; overflow-y:auto;">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
+    <h3 style="margin:0; font-size:14px; color:#f0f2f5;">Settings</h3>
+    <button onclick="toggleSettings()" style="background:none; border:none; color:#666; font-size:20px; cursor:pointer;">&times;</button>
+  </div>
+  <div style="color:#8a93a6; font-size:12px; margin-bottom:20px;" id="app-version">Vizoguard</div>
+  <button class="btn btn-sm" id="update-btn" onclick="checkUpdate()" style="width:100%; margin-bottom:12px;">Check for Updates</button>
+  <button class="btn btn-sm btn-ghost" onclick="window.vizoguard.openExternal('mailto:support@vizoguard.com')" style="width:100%; margin-bottom:12px;">Contact Support</button>
+  <button class="btn btn-sm btn-ghost" onclick="window.vizoguard.openExternal('https://vizoguard.com')" style="width:100%; margin-bottom:24px;">Visit Website</button>
+  <hr style="border:none; border-top:1px solid #1a2235; margin-bottom:24px;">
+  <button class="btn btn-sm" onclick="window.vizoguard.quit()" style="width:100%; background:#ff3b3b; border-color:#ff3b3b;">Quit Vizoguard</button>
+</div>
 
 <script>
-  // Window controls for Windows
+  // Note: Window controls use a static trusted string, not user input
   if (window.vizoguard.platform !== 'darwin') {
-    document.getElementById('controls').innerHTML = `
-      <button class="titlebar-btn" onclick="window.vizoguard.minimize()">&#x2212;</button>
-      <button class="titlebar-btn" onclick="window.vizoguard.close()">&#x2715;</button>
-    `;
+    var ctrl = document.getElementById('controls');
+    var minBtn = document.createElement('button');
+    minBtn.className = 'titlebar-btn';
+    minBtn.textContent = '\u2212';
+    minBtn.onclick = function() { window.vizoguard.minimize(); };
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'titlebar-btn';
+    closeBtn.textContent = '\u2715';
+    closeBtn.onclick = function() { window.vizoguard.close(); };
+    ctrl.appendChild(minBtn);
+    ctrl.appendChild(closeBtn);
   }
 
-  let vpnConnected = false;
+  var vpnConnected = false;
 
   async function init() {
-    // License info
-    const status = await window.vizoguard.getLicenseStatus();
+    var status = await window.vizoguard.getLicenseStatus();
     if (status) {
       document.getElementById('license-display').textContent = status.key || '';
       if (status.expires) {
-        const exp = new Date(status.expires);
+        var exp = new Date(status.expires);
         document.getElementById('expires-display').textContent =
-          `Expires ${exp.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+          'Expires ' + exp.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
       }
       if (status.status === 'offline') {
-        document.getElementById('status-sub').textContent = 'Offline mode — grace period active';
+        document.getElementById('status-sub').textContent = 'Offline mode \u2014 grace period active';
       }
     }
-
-    // VPN status
-    const vpnState = await window.vizoguard.vpnStatus();
+    var vpnState = await window.vizoguard.vpnStatus();
     updateVpnUI(vpnState.connected);
-
-    // Security stats
-    const stats = await window.vizoguard.getSecurityStats();
+    var stats = await window.vizoguard.getSecurityStats();
     updateStats(stats);
   }
 
   function updateVpnUI(connected) {
     vpnConnected = connected;
-    const btn = document.getElementById('vpn-btn');
-    const statusEl = document.getElementById('vpn-status');
-
+    var btn = document.getElementById('vpn-btn');
+    var statusEl = document.getElementById('vpn-status');
     if (connected) {
       statusEl.textContent = 'Connected';
       statusEl.style.color = 'var(--accent)';
@@ -123,20 +154,18 @@
 
   function updateStats(stats) {
     document.getElementById('threat-count').textContent = stats.threatsBlocked;
-    document.getElementById('scan-count').textContent = `${stats.requestsScanned} scanned`;
+    document.getElementById('scan-count').textContent = stats.requestsScanned + ' scanned';
     document.getElementById('conn-count').textContent = stats.activeConnections;
-
     if (stats.immuneEvents > 0) {
-      document.getElementById('immune-status').textContent = `${stats.immuneEvents} alert(s)`;
+      document.getElementById('immune-status').textContent = stats.immuneEvents + ' alert(s)';
       document.getElementById('immune-status').style.color = 'var(--red)';
     }
   }
 
   function setShieldState(active) {
-    const shield = document.getElementById('shield');
-    const text = document.getElementById('status-text');
-    const sub = document.getElementById('status-sub');
-
+    var shield = document.getElementById('shield');
+    var text = document.getElementById('status-text');
+    var sub = document.getElementById('status-sub');
     if (active) {
       shield.className = 'shield active';
       text.className = 'status-text active';
@@ -147,88 +176,173 @@
       text.className = 'status-text inactive';
       text.textContent = 'Threat Detected';
       sub.textContent = 'Blocking in progress...';
-      // Flash back to green after 3 seconds
-      setTimeout(() => setShieldState(true), 3000);
+      setTimeout(function() { setShieldState(true); }, 3000);
     }
   }
 
+  // ── VPN Toggle ──
+
   async function toggleVpn() {
-    const btn = document.getElementById('vpn-btn');
+    var btn = document.getElementById('vpn-btn');
     btn.disabled = true;
-    btn.textContent = vpnConnected ? 'Disconnecting...' : 'Connecting...';
 
     if (vpnConnected) {
-      const result = await window.vizoguard.vpnDisconnect();
-      if (!result.success) showToast('Disconnect failed: ' + result.error);
+      btn.textContent = 'Disconnecting...';
+      var result = await window.vizoguard.vpnDisconnect();
+      if (result.success) {
+        vpnConnected = false;
+        updateVpnUI(false);
+        showToast('VPN disconnected');
+      } else {
+        showToast('Disconnect failed: ' + result.error, true);
+      }
     } else {
-      // Ensure we have the key first
-      const keyResult = await window.vizoguard.getVpnKey();
+      btn.textContent = 'Connecting...';
+      var keyResult = await window.vizoguard.getVpnKey();
       if (keyResult.error) {
-        showToast('No VPN key: ' + keyResult.error);
+        showToast('No VPN key: ' + keyResult.error, true);
         btn.disabled = false;
         btn.textContent = 'Connect';
         return;
       }
-
-      const result = await window.vizoguard.vpnConnect();
-      if (!result.success) showToast('Connect failed: ' + result.error);
+      var connectResult = await window.vizoguard.vpnConnect();
+      if (connectResult.success) {
+        vpnConnected = true;
+        updateVpnUI(true);
+        showToast('VPN connected');
+      } else {
+        showToast('Connect failed: ' + (connectResult.error || 'Unknown error'), true);
+      }
     }
-
     btn.disabled = false;
-    updateVpnUI(vpnConnected);
   }
 
-  function showToast(msg) {
-    const toast = document.getElementById('toast');
-    toast.textContent = msg;
-    toast.classList.add('show');
-    setTimeout(() => toast.classList.remove('show'), 3000);
+  // ── Toasts ──
+
+  var toastTimer = null;
+  var toastIsCritical = false;
+
+  function showToast(msg, critical) {
+    critical = critical || false;
+    var toast = document.getElementById('toast');
+    var msgEl = document.getElementById('toast-msg');
+    var dismissBtn = document.getElementById('toast-dismiss');
+
+    if (!critical && toastIsCritical) return;
+    if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+
+    msgEl.textContent = msg;
+    toastIsCritical = critical;
+
+    if (critical) {
+      toast.className = 'toast critical show';
+      dismissBtn.style.display = '';
+    } else {
+      toast.className = 'toast show';
+      dismissBtn.style.display = 'none';
+      toastTimer = setTimeout(function() {
+        toast.classList.remove('show');
+        toastIsCritical = false;
+      }, 3000);
+    }
   }
+
+  function dismissToast() {
+    var toast = document.getElementById('toast');
+    toast.classList.remove('show');
+    toastIsCritical = false;
+    if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+  }
+
+  // ── Settings Panel ──
+
+  async function toggleSettings() {
+    var panel = document.getElementById('settings-panel');
+    var backdrop = document.getElementById('settings-backdrop');
+    var isOpen = panel.style.display !== 'none';
+
+    if (isOpen) {
+      panel.style.display = 'none';
+      backdrop.style.display = 'none';
+    } else {
+      var version = await window.vizoguard.getAppVersion();
+      document.getElementById('app-version').textContent = 'Vizoguard v' + version;
+      panel.style.display = '';
+      backdrop.style.display = '';
+    }
+  }
+
+  async function checkUpdate() {
+    var btn = document.getElementById('update-btn');
+    btn.textContent = 'Checking...';
+    btn.disabled = true;
+    await window.vizoguard.checkForUpdate();
+  }
+
+  window.vizoguard.onUpdateNotAvailable(function() {
+    var btn = document.getElementById('update-btn');
+    btn.textContent = 'Up to date';
+    setTimeout(function() { btn.textContent = 'Check for Updates'; btn.disabled = false; }, 3000);
+  });
+
+  window.vizoguard.onUpdateAvailable(function() {
+    var btn = document.getElementById('update-btn');
+    btn.textContent = 'Downloading...';
+    btn.disabled = true;
+  });
+
+  window.vizoguard.onUpdateError(function() {
+    var btn = document.getElementById('update-btn');
+    btn.textContent = 'Check failed';
+    setTimeout(function() { btn.textContent = 'Check for Updates'; btn.disabled = false; }, 3000);
+  });
 
   // ── Live events from main process ──
 
-  window.vizoguard.onThreatBlocked((data) => {
+  window.vizoguard.onThreatBlocked(function(data) {
     document.getElementById('threat-count').textContent = data.total;
-    setShieldState(false); // Flash red
-    showToast(`Blocked: ${data.url.substring(0, 40)}...`);
+    setShieldState(false);
+    showToast('Blocked: ' + (data.url || '').substring(0, 40) + '...', true);
   });
 
-  window.vizoguard.onConnectionsUpdate((data) => {
+  window.vizoguard.onConnectionsUpdate(function(data) {
     document.getElementById('conn-count').textContent = data.active;
   });
 
-  window.vizoguard.onImmuneAlert((data) => {
-    document.getElementById('immune-status').textContent = `${data.type}: ${data.file}`;
+  window.vizoguard.onImmuneAlert(function(data) {
+    document.getElementById('immune-status').textContent = data.type + ': ' + data.file;
     document.getElementById('immune-status').style.color = 'var(--red)';
-    showToast(`Immune: ${data.type} detected on ${data.file}`);
+    showToast('Immune: ' + data.type + ' detected on ' + data.file, true);
   });
 
-  window.vizoguard.onVpnState((data) => {
+  window.vizoguard.onVpnState(function(data) {
     updateVpnUI(data.connected);
   });
 
-  window.vizoguard.onStatusChange((status) => {
-    if (!status.valid) return; // main process navigates to expired
+  window.vizoguard.onStatusChange(function(status) {
+    if (!status.valid) return;
     document.getElementById('status-sub').textContent =
-      status.status === 'offline' ? 'Offline mode — grace period active' : 'All systems active';
+      status.status === 'offline' ? 'Offline mode \u2014 grace period active' : 'All systems active';
   });
 
-  window.vizoguard.onUpdateReady((data) => {
+  window.vizoguard.onUpdateReady(function() {
     document.getElementById('update-banner').style.display = 'flex';
+    var btn = document.getElementById('update-btn');
+    btn.textContent = 'Update ready';
+    btn.disabled = true;
   });
 
-  window.vizoguard.onVpnError((data) => {
-    showToast('VPN error: ' + data.message);
+  window.vizoguard.onVpnError(function(data) {
+    showToast('VPN error: ' + data.message, true);
     updateVpnUI(false);
   });
 
-  window.vizoguard.onSecurityError((data) => {
-    showToast(data.message);
+  window.vizoguard.onSecurityError(function(data) {
+    showToast(data.message, true);
   });
 
-  // Poll stats every 10 seconds
-  setInterval(async () => {
-    const stats = await window.vizoguard.getSecurityStats();
+  setInterval(async function() {
+    var stats = await window.vizoguard.getSecurityStats();
     updateStats(stats);
   }, 10000);
 

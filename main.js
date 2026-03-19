@@ -155,15 +155,25 @@ updater.on("downloaded", (info) => {
   sendToRenderer("update:ready", { version: info.version });
 });
 
+updater.on("not-available", () => {
+  sendToRenderer("update:not-available", {});
+});
+
+updater.on("available", (info) => {
+  sendToRenderer("update:available", { version: info.version });
+});
+
+updater.on("error", (err) => {
+  sendToRenderer("update:error", { message: err.message });
+});
+
 // ── IPC Handlers ──────────────────────────────
 
 ipcMain.handle("license:activate", async (_event, key) => {
   try {
     const result = await license.activate(key);
-    showPage("dashboard.html");
-    updateMenu(true, trayCallbacks);
-    license.startPeriodicCheck();
-    startSecurityEngine();
+    // Return immediately — renderer shows success animation,
+    // then calls app:showDashboard to navigate + start engine
     return result;
   } catch (err) {
     return { success: false, error: err.error || err.message || "Activation failed" };
@@ -254,6 +264,19 @@ ipcMain.handle("app:quit", () => trayCallbacks.quit());
 ipcMain.handle("app:minimize", () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize(); });
 ipcMain.handle("app:close", () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide(); });
 
+ipcMain.handle("app:version", () => app.getVersion());
+
+ipcMain.handle("update:check", () => {
+  updater.check(); // Fire-and-forget; results come via update events
+});
+
+ipcMain.handle("app:showDashboard", async () => {
+  showPage("dashboard.html");
+  updateMenu(true, trayCallbacks);
+  license.startPeriodicCheck();
+  await startSecurityEngine();
+});
+
 // ── Security Engine Start ─────────────────────
 
 async function startSecurityEngine() {
@@ -299,20 +322,28 @@ app.whenReady().then(async () => {
     return;
   }
 
-  const result = await license.validate();
+  // Instant startup: load dashboard immediately from cached license
+  createWindow("dashboard.html");
+  updateMenu(true, trayCallbacks);
 
-  if (result.valid) {
-    createWindow("dashboard.html");
-    license.startPeriodicCheck();
-    await startSecurityEngine();
-    updateMenu(true, trayCallbacks);
+  // Background validation — don't block the UI
+  license.validate().then(async (result) => {
+    if (result.valid) {
+      license.startPeriodicCheck();
+      await startSecurityEngine();
+      updateMenu(true, trayCallbacks);
 
-    // Check for updates silently
-    setTimeout(() => updater.check(), 5000);
-  } else {
-    createWindow("expired.html");
-    updateMenu(false, trayCallbacks);
-  }
+      // Check for updates silently
+      setTimeout(() => updater.check(), 5000);
+    } else {
+      // License invalid/expired/suspended — navigate away from dashboard
+      showPage("expired.html");
+      updateMenu(false, trayCallbacks);
+    }
+  }).catch((err) => {
+    // Network error — log it, dashboard stays visible (grace period applies)
+    console.error("Background license validation failed:", err);
+  });
 });
 
 app.on("second-instance", () => {

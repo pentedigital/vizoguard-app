@@ -15,6 +15,11 @@ contextBridge.exposeInMainWorld("vizoguard", {
   // Security
   getSecurityStats: () => ipcRenderer.invoke("security:stats"),
 
+  // Settings
+  getAppVersion: () => ipcRenderer.invoke("app:version"),
+  checkForUpdate: () => ipcRenderer.invoke("update:check"),
+  showDashboard: () => ipcRenderer.invoke("app:showDashboard"),
+
   // Updates
   installUpdate: () => ipcRenderer.invoke("update:install"),
 
@@ -33,6 +38,9 @@ contextBridge.exposeInMainWorld("vizoguard", {
   onUpdateReady: (cb) => { ipcRenderer.removeAllListeners("update:ready"); ipcRenderer.on("update:ready", (_e, d) => cb(d)); },
   onVpnError: (cb) => { ipcRenderer.removeAllListeners("vpn:error"); ipcRenderer.on("vpn:error", (_e, d) => cb(d)); },
   onSecurityError: (cb) => { ipcRenderer.removeAllListeners("security:error"); ipcRenderer.on("security:error", (_e, d) => cb(d)); },
+  onUpdateNotAvailable: (cb) => { ipcRenderer.removeAllListeners("update:not-available"); ipcRenderer.on("update:not-available", (_e, d) => cb(d)); },
+  onUpdateAvailable: (cb) => { ipcRenderer.removeAllListeners("update:available"); ipcRenderer.on("update:available", (_e, d) => cb(d)); },
+  onUpdateError: (cb) => { ipcRenderer.removeAllListeners("update:error"); ipcRenderer.on("update:error", (_e, d) => cb(d)); },
 
   platform: process.platform,
 });
