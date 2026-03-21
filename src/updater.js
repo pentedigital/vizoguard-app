@@ -4,7 +4,8 @@ const { EventEmitter } = require("events");
 class Updater extends EventEmitter {
   constructor() {
     super();
-    autoUpdater.autoDownload = true;
+    // Let user control downloads to prevent partial/corrupted installs (#27)
+    autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = true;
 
     autoUpdater.on("checking-for-update", () => {

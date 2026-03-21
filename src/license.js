@@ -46,7 +46,7 @@ class LicenseManager {
   isExpired() {
     const expires = this.store.get("license.expires");
     if (!expires) return true;
-    return new Date(expires) < new Date();
+    return new Date(expires).getTime() < Date.now();
   }
 
   async activate(key) {
@@ -57,7 +57,15 @@ class LicenseManager {
 
     const deviceId = await platform.getDeviceId();
 
-    const result = await apiCall("/license", { key, device_id: deviceId });
+    let result;
+    try {
+      result = await apiCall("/license", { key, device_id: deviceId });
+    } catch (err) {
+      if (err.httpStatus === 403 && err.status === "device_mismatch") {
+        throw new Error("This license is already activated on another device. Contact support@vizoguard.com to transfer.");
+      }
+      throw err;
+    }
 
     this.store.set("license", {
       key,
@@ -96,7 +104,13 @@ class LicenseManager {
         try {
           const vpn = await apiCall("/vpn/get", { key, device_id: deviceId });
           this.store.set("license.vpnAccessUrl", vpn.access_url);
-        } catch { /* VPN key may not exist yet */ }
+        } catch (vpnErr) {
+          // 403 = revoked/mismatch — clear stale key (#23)
+          if (vpnErr.httpStatus === 403) {
+            this.store.delete("license.vpnAccessUrl");
+          }
+          // 404 = not provisioned yet — ignore
+        }
       }
 
       this._emit({ valid: true, status: result.status, expires: result.expires });
@@ -123,6 +137,7 @@ class LicenseManager {
       }
 
       // Network error — check grace period
+      console.error("License validation failed (network):", err.message || err);
       if (this.isGracePeriodValid() && !this.isExpired()) {
         this._emit({ valid: true, status: "offline", expires: this.store.get("license.expires") });
         return { valid: true, status: "offline", expires: this.store.get("license.expires") };

@@ -86,6 +86,7 @@ class SecurityProxy extends EventEmitter {
 
       req.pipe(proxyReq);
     } catch (e) {
+      console.error("Security proxy error:", e.message);
       res.writeHead(500);
       res.end("Proxy error");
     }

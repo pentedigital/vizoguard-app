@@ -126,6 +126,7 @@ class AeadDecryptor {
           chunks.push(payload);
           this._waitingForPayload = false;
         } catch {
+          this._failed = true;
           return chunks;
         }
       }
@@ -141,6 +142,8 @@ class VpnManager extends EventEmitter {
     this.store = store;
     this._server = null;
     this._connected = false;
+    this._connecting = false;
+    this._licenseValid = true;
     this._remoteHost = null;
     this._remotePort = null;
     this._password = null;
@@ -181,46 +184,59 @@ class VpnManager extends EventEmitter {
 
   // Start local SOCKS5 proxy and set system proxy
   async connect() {
-    if (this._connected) return;
+    if (this._connected || this._connecting) return;
+    this._connecting = true;
 
-    const accessUrl = this.store.get("license.vpnAccessUrl");
-    if (!accessUrl) throw new Error("No VPN access key configured");
-
-    let config;
     try {
-      config = this._parseAccessUrl(accessUrl);
-    } catch (e) {
-      throw new Error(`Invalid VPN configuration: ${e.message}`);
-    }
+      const accessUrl = this.store.get("license.vpnAccessUrl");
+      if (!accessUrl) throw new Error("No VPN access key configured");
 
-    this._remoteHost = config.host;
-    this._remotePort = config.port;
-    this._password = config.password;
-    this._method = config.method;
-    this._cipherInfo = CIPHER_INFO[config.method];
-    this._masterKey = evpBytesToKey(config.password, this._cipherInfo.keyLen);
-
-    // Start SOCKS5 proxy server
-    await this._startSocksProxy();
-
-    // Set system proxy to our local SOCKS5
-    try {
-      await platform.setProxy(SOCKS_HOST, SOCKS_PORT);
-    } catch (e) {
-      // Rollback: stop SOCKS server if proxy setup fails
-      if (this._server) {
-        this._server.close();
-        this._server = null;
+      let config;
+      try {
+        config = this._parseAccessUrl(accessUrl);
+      } catch (e) {
+        throw new Error(`Invalid VPN configuration: ${e.message}`);
       }
-      throw new Error(`Failed to set system proxy: ${e.message}`);
+
+      this._remoteHost = config.host;
+      this._remotePort = config.port;
+      this._password = config.password;
+      this._method = config.method;
+      this._cipherInfo = CIPHER_INFO[config.method];
+      this._masterKey = evpBytesToKey(config.password, this._cipherInfo.keyLen);
+
+      // Start SOCKS5 proxy server
+      await this._startSocksProxy();
+
+      // Set system proxy to our local SOCKS5
+      try {
+        await platform.setProxy(SOCKS_HOST, SOCKS_PORT);
+      } catch (e) {
+        // Rollback: stop SOCKS server if proxy setup fails
+        if (this._server) {
+          this._server.close();
+          this._server = null;
+        }
+        throw new Error(`Failed to set system proxy: ${e.message}`);
+      }
+
+      this._connected = true;
+    } finally {
+      this._connecting = false;
     }
 
-    this._connected = true;
+    // Check if license was invalidated during connect (#26)
+    if (this._licenseValid === false) {
+      await this.disconnect().catch(() => {});
+      return;
+    }
+
     this.emit("connected");
   }
 
   async disconnect() {
-    if (!this._connected) return;
+    if (!this._connected && !this._connecting) return;
+    this._connecting = false;
 
     // Clear system proxy
     try {

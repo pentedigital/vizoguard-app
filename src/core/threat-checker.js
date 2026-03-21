@@ -45,6 +45,8 @@ class ThreatChecker extends EventEmitter {
           if (domain && !domain.startsWith("#")) this._blocklist.add(domain);
         });
         console.log(`Loaded ${this._blocklist.size} blocked domains`);
+      } else {
+        console.warn("Blocklist file not found — domain blocklist protection inactive");
       }
     } catch (e) {
       console.error("Failed to load blocklist:", e.message);

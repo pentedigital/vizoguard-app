@@ -15,7 +15,15 @@ if (!app.requestSingleInstanceLock()) {
   process.exit(0);
 }
 
-const store = new Store();
+// Resilient store — recover from corrupted JSON (#25)
+let store;
+try {
+  store = new Store();
+} catch (e) {
+  console.error("Store corrupted, resetting:", e.message);
+  try { fs.unlinkSync(path.join(app.getPath("userData"), "config.json")); } catch {}
+  store = new Store();
+}
 const license = new LicenseManager(store);
 
 // Data directory for threat lists
@@ -133,6 +141,7 @@ vpn.on("connected", () => {
 
 vpn.on("disconnected", () => {
   sendToRenderer("vpn:state", { connected: false });
+  updateMenu(false, trayCallbacks);
 });
 
 vpn.on("error", (err) => {
@@ -283,7 +292,10 @@ ipcMain.handle("app:showDashboard", async () => {
 
 // ── Security Engine Start ─────────────────────
 
+let _engineStarted = false;
 async function startSecurityEngine() {
+  if (_engineStarted) return;
+  _engineStarted = true;
   try {
     await securityProxy.start();
   } catch (e) {
@@ -301,13 +313,16 @@ license.onStatusChange((status) => {
   sendToRenderer("status:changed", status);
 
   if (!status.valid) {
+    vpn._licenseValid = false;
     showPage("expired.html");
     updateMenu(false, trayCallbacks);
     securityProxy.stop();
     connectionMonitor.stop();
     immuneSystem.stop();
+    _engineStarted = false;
     vpn.disconnect().catch(() => {});
   } else {
+    vpn._licenseValid = true;
     updateMenu(true, trayCallbacks);
   }
 });
