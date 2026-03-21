@@ -94,6 +94,17 @@
 - New modules: SecurityEngine (`engine.js`), Sentinel (`sentinel.js` + `sentinel-worker.js`), CanarySystem (`canary.js`), PersistenceHardener (`persistence.js`), DeviceMonitor (`device-monitor.js`)
 - New IPC channels: `device:status`, `device:trust`, `device:untrust`, `canary:alert`, `device:alert`, `persistence:restored`
 
+## UI Design (Premium Glass-Morphism Redesign)
+- Theme: dark glass-morphism (`backdrop-filter: blur(12px)`, `rgba(255,255,255,0.06)` surfaces)
+- Window: 480x780 frameless, minHeight 700
+- Connect button: 180px circle, 5 states (idle/connecting/connected/error/reconnecting) with animated glow, pulse, shake, shimmer
+- Engine view: collapsible glass panel — VPN tunnel info + security engine metrics + immune system layers + "What Just Happened?" message rotation
+- Settings: right-side slide-over panel (320px, glass background), toggles + license + version + quit
+- CSS/JS only — no frameworks, no build step
+- Animation files: `ui/js/animations.js` (button states, timer), `ui/js/engine-monitor.js` (engine view, live metrics)
+- New IPC: `engine:metrics`, `engine:subscribe`/`unsubscribe`, `settings:get`/`settings:set`
+- Colors: --teal (connected), --amber (connecting), --red (error), --accent (action buttons)
+
 ## Related Repos
 - Backend/API: `pentedigital/vizoguard` (Node.js server, lives at `/root/vizoguard`)
 - API base: `https://vizoguard.com/api` — endpoints in `src/api.js`
