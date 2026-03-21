@@ -42,5 +42,15 @@ contextBridge.exposeInMainWorld("vizoguard", {
   onUpdateAvailable: (cb) => { ipcRenderer.removeAllListeners("update:available"); ipcRenderer.on("update:available", (_e, d) => cb(d)); },
   onUpdateError: (cb) => { ipcRenderer.removeAllListeners("update:error"); ipcRenderer.on("update:error", (_e, d) => cb(d)); },
 
+  // Engine metrics
+  getEngineMetrics: () => ipcRenderer.invoke("engine:metrics"),
+  subscribeEngine: () => ipcRenderer.send("engine:subscribe"),
+  unsubscribeEngine: () => ipcRenderer.send("engine:unsubscribe"),
+  onEngineUpdate: (cb) => { ipcRenderer.removeAllListeners("engine:update"); ipcRenderer.on("engine:update", (_e, d) => cb(d)); },
+
+  // Settings persistence
+  getSettings: () => ipcRenderer.invoke("settings:get"),
+  setSetting: (key, value) => ipcRenderer.invoke("settings:set", key, value),
+
   platform: process.platform,
 });
