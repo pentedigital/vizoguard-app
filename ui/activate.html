@@ -39,7 +39,7 @@
   <button class="btn" id="activate-btn" onclick="activate()">Activate</button>
 
   <p class="activate-footer">
-    Don't have a key? <a href="#" onclick="window.vizoguard.openExternal('https://vizoguard.com/#pricing')">Get one at vizoguard.com</a>
+    Don't have a key? <button class="link-btn" id="pricing-link">Get one at vizoguard.com</button>
   </p>
 </div><!-- .glass.activate-card -->
 
@@ -62,6 +62,10 @@
   const input = document.getElementById('license-input');
   const btn = document.getElementById('activate-btn');
   const errorMsg = document.getElementById('error-msg');
+
+  document.getElementById('pricing-link').addEventListener('click', function() {
+    window.vizoguard.openExternal('https://vizoguard.com/#pricing');
+  });
 
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') activate();

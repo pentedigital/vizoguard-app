@@ -133,7 +133,7 @@ function logConnection(action, details = {}) {
 
 function updateWeeklyStats(type) {
   const key = 'weeklyStats';
-  const stats = store.get(key, { threats: 0, connections: 0, timeProtected: 0, weekStart: new Date().toISOString() });
+  let stats = store.get(key, { threats: 0, connections: 0, timeProtected: 0, weekStart: new Date().toISOString() });
 
   // Reset if more than 7 days old — fall through to process current increment
   if (new Date() - new Date(stats.weekStart) > 7 * 24 * 60 * 60 * 1000) {
@@ -187,11 +187,11 @@ vpn.on("connected", () => {
   _weeklyTimeInterval = setInterval(() => {
     if (vpn.isConnected) updateWeeklyStats('time');
   }, 60000);
-  // Update tray tooltip with weekly stats
-  const stats = store.get('weeklyStats', { threats: 0 });
-  try { tray && tray.setToolTip && tray.setToolTip(`Vizoguard — ${stats.threats} threats blocked this week`); } catch {}
   sendToRenderer("vpn:state", { connected: true });
   updateMenu(true, trayCallbacks);
+  // Update tray tooltip with weekly stats (after updateMenu so it is not overwritten)
+  const stats = store.get('weeklyStats', { threats: 0 });
+  try { tray && tray.setToolTip && tray.setToolTip(`Vizoguard — ${stats.threats} threats blocked this week`); } catch {}
 });
 
 vpn.on("disconnected", () => {

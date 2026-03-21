@@ -509,8 +509,7 @@
   window.vizoguard.onUpdateReady(function() {
     showToast('Update ready \u2014 restart to apply');
     var btn = document.getElementById('update-btn');
-    if (btn) { btn.textContent = 'Restart to update'; btn.disabled = false; }
-    btn.onclick = function() { window.vizoguard.installUpdate(); };
+    if (btn) { btn.textContent = 'Restart to update'; btn.disabled = false; btn.onclick = function() { window.vizoguard.installUpdate(); }; }
   });
 
   window.vizoguard.onUpdateAvailable(function() {

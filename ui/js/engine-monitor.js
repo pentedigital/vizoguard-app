@@ -120,6 +120,10 @@ function _applyEngineExpand(expanded, persist) {
 /* ── startEngineUpdates() ────────────────────────────────────── */
 
 function startEngineUpdates() {
+  // Only poll when the engine panel is expanded
+  var engineEl = document.getElementById('engine-view');
+  if (!engineEl || !engineEl.classList.contains('expanded')) return;
+
   // Subscribe to engine events from main process
   if (!_engineSubscribed) {
     try {

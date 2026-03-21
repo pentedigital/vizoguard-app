@@ -150,6 +150,7 @@ class VpnManager extends EventEmitter {
     this._method = null;
     this._masterKey = null;
     this._cipherInfo = null;
+    this._sockets = new Set();
   }
 
   get isConnected() {
@@ -250,6 +251,12 @@ class VpnManager extends EventEmitter {
       console.error("Failed to clear proxy:", e.message);
     }
 
+    // Destroy all tracked client sockets before closing the server
+    if (this._sockets) {
+      this._sockets.forEach(s => s.destroy());
+      this._sockets.clear();
+    }
+
     // Stop SOCKS5 server
     if (this._server) {
       this._server.close();
@@ -270,9 +277,8 @@ class VpnManager extends EventEmitter {
       this._server.on("error", (err) => {
         console.error("SOCKS proxy error:", err.message);
         this.emit("error", err);
-        if (this._connected) {
-          this.disconnect().catch(() => {});
-        } else {
+        this.disconnect().catch(() => {});
+        if (!this._connected) {
           reject(err);
         }
       });
@@ -285,6 +291,10 @@ class VpnManager extends EventEmitter {
   }
 
   _handleSocksConnection(client) {
+    // Track socket for clean shutdown
+    this._sockets.add(client);
+    client.on('close', () => this._sockets.delete(client));
+
     // SOCKS5 handshake
     client.once("data", (data) => {
       if (data[0] !== 0x05) {
@@ -431,6 +441,7 @@ class VpnManager extends EventEmitter {
       header.writeUInt16BE(port, 17);
     } else {
       const domainBuf = Buffer.from(host);
+      if (domainBuf.length > 255) throw new Error('Domain name too long for SOCKS5');
       header = Buffer.alloc(4 + domainBuf.length);
       header[0] = 0x03; // Domain
       header[1] = domainBuf.length;
