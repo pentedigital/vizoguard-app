@@ -17,7 +17,7 @@
 
 ## App Config
 - appId: `com.vizoguard.app` (version in `package.json`)
-- Window: 420x700, frameless, not resizable
+- Window: 480x780, frameless, not resizable (minHeight 700)
 - Single-instance enforced — second launch focuses existing window
 - macOS: dock hidden, tray-only
 - Publish: GitHub Releases (owner: pentedigital, repo: vizoguard-app)

@@ -217,14 +217,11 @@ function _applyStats(data) {
 
   // -- Security Engine section
   // requests per second
-  if (data.rps !== undefined) {
-    var rpsText = data.rps + ' req/s';
-    _setText('eng-rps', rpsText);          // spec name
-    _setText('eng-proxy-rps', rpsText);    // actual HTML id
-  } else if (data.requestsPerSec !== undefined) {
-    var rpsText2 = data.requestsPerSec + ' req/s';
-    _setText('eng-rps', rpsText2);
-    _setText('eng-proxy-rps', rpsText2);
+  var rps = data.rps !== undefined ? data.rps : data.requestsPerSec;
+  if (rps !== undefined) {
+    var rpsText = rps + ' req/s';
+    _setText('eng-rps', rpsText);
+    _setText('eng-proxy-rps', rpsText);
   }
 
   // cache entries
