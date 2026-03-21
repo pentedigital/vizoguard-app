@@ -376,25 +376,24 @@ function getEngineMetrics() {
   // Populate from actual modules if available
   try {
     if (typeof threatChecker !== 'undefined' && threatChecker) {
-      stats.proxy.cachedEntries = threatChecker.cache?.size || 0;
-      stats.proxy.threatsBlocked = threatChecker._blockedCount || 0;
-      stats.immune.layers[0].level = threatChecker.cache?.size > 0 ? 98 : 0;
+      stats.proxy.cachedEntries = threatChecker._cache?.size || 0;
+      stats.proxy.threatsBlocked = threatChecker.threatsBlocked || 0;
+      stats.immune.layers[0].level = threatChecker._cache?.size > 0 ? 98 : 0;
     }
     if (typeof connectionMonitor !== 'undefined' && connectionMonitor) {
-      stats.proxy.activeConnections = connectionMonitor._activeCount || 0;
-      stats.immune.layers[1].level = connectionMonitor._activeCount > 0 ? 64 : 0;
+      stats.proxy.activeConnections = connectionMonitor.activeConnections || 0;
+      stats.immune.layers[1].level = connectionMonitor.activeConnections > 0 ? 64 : 0;
     }
     if (typeof securityProxy !== 'undefined' && securityProxy) {
-      stats.proxy.requestsPerSec = securityProxy._requestCount || 0;
+      stats.proxy.requestsPerSec = securityProxy.requestsScanned || 0;
     }
     if (typeof vpn !== 'undefined' && vpn) {
       stats.vpn.ipMasked = vpn?.isConnected || false;
       stats.vpn.dnsEncrypted = vpn?.isConnected || false;
       stats.vpn.serverHost = vpn.getServerHost?.() || '—';
     }
-    // Immune system hardcoded levels for now (actual implementation in Phase 5)
-    stats.immune.layers[2].level = 16;
-    stats.immune.layers[3].level = 81;
+    stats.immune.layers[2].level = 0; // Persistence — not yet implemented
+    stats.immune.layers[3].level = 0; // Sentinel — not yet implemented
   } catch (e) {
     // Non-fatal — return defaults
   }
@@ -450,7 +449,10 @@ ipcMain.on("engine:unsubscribe", (event) => {
 
 // ── Settings Persistence ──────────────────────
 
-ipcMain.handle("settings:get", () => store.store);
+ipcMain.handle("settings:get", () => ({
+  autoConnect: store.get('autoConnect', false),
+  notifications: store.get('notifications', true),
+}));
 ipcMain.handle("settings:get-one", (_e, key) => store.get(key));
 ipcMain.handle("settings:set", (_e, key, value) => { store.set(key, value); });
 
@@ -527,6 +529,11 @@ app.whenReady().then(async () => {
       license.startPeriodicCheck();
       await startSecurityEngine();
       updateMenu(true, trayCallbacks);
+
+      // Auto-connect if setting is enabled
+      if (store.get('autoConnect')) {
+        vpn.connect().catch(() => {});
+      }
 
       // Check for updates silently
       setTimeout(() => updater.check(), 5000);

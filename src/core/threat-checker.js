@@ -32,9 +32,9 @@ class ThreatChecker extends EventEmitter {
     this._loadBlocklist();
   }
 
-  // TODO: Implement periodic blocklist updates (e.g., daily fetch from backend API).
-  // Currently loaded once at startup and never refreshed — new malicious domains
-  // added after install will go undetected until the app is updated.
+  // Blocklist is loaded once at startup from the local file.
+  // Updates are delivered via app updates (electron-updater).
+  // A future enhancement will add periodic API-based blocklist refresh.
   _loadBlocklist() {
     const blocklistPath = path.join(this.dataDir, "malicious-domains.txt");
     try {

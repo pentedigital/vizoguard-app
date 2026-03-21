@@ -10,7 +10,6 @@
 
 /* ── Internal state ───────────────────────────────────────── */
 
-var _engineUpdateInterval  = null;
 var _messageRotateInterval = null;
 var _threatMessages        = [];   // newest-first queue, max 20
 var _messageIndex          = 0;    // current position in fallback cycle
@@ -124,7 +123,7 @@ function startEngineUpdates() {
   var engineEl = document.getElementById('engine-view');
   if (!engineEl || !engineEl.classList.contains('expanded')) return;
 
-  // Subscribe to engine events from main process
+  // Subscribe to push updates from main process
   if (!_engineSubscribed) {
     try {
       if (typeof window.vizoguard.subscribeEngine === 'function') {
@@ -136,29 +135,11 @@ function startEngineUpdates() {
       _engineSubscribed = true;
     } catch (e) {}
   }
-
-  // Polling fallback: refresh via getSecurityStats every 1 s
-  if (_engineUpdateInterval) return;
-  _engineUpdateInterval = setInterval(function() {
-    try {
-      if (typeof window.vizoguard.getSecurityStats === 'function') {
-        window.vizoguard.getSecurityStats().then(function(stats) {
-          if (!stats) return;
-          _applyStats(stats);
-        }).catch(function() {});
-      }
-    } catch (e) {}
-  }, 1000);
 }
 
 /* ── stopEngineUpdates() ─────────────────────────────────────── */
 
 function stopEngineUpdates() {
-  if (_engineUpdateInterval) {
-    clearInterval(_engineUpdateInterval);
-    _engineUpdateInterval = null;
-  }
-
   if (_engineSubscribed) {
     try {
       if (typeof window.vizoguard.unsubscribeEngine === 'function') {

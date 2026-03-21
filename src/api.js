@@ -1,4 +1,5 @@
 const https = require("https");
+const pkg = require("../package.json");
 
 const API_BASE = "https://vizoguard.com/api";
 
@@ -15,7 +16,7 @@ function apiCall(endpoint, body) {
       headers: {
         "Content-Type": "application/json",
         "Content-Length": Buffer.byteLength(payload),
-        "User-Agent": "Vizoguard/1.1.0",
+        "User-Agent": `Vizoguard/${pkg.version}`,
       },
     };
 

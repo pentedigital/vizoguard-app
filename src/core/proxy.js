@@ -140,6 +140,12 @@ class SecurityProxy extends EventEmitter {
       return;
     }
 
+    // Track client socket for clean shutdown
+    if (this._sockets) {
+      this._sockets.add(clientSocket);
+      clientSocket.on('close', () => this._sockets.delete(clientSocket));
+    }
+
     // Allow the tunnel
     const serverSocket = net.createConnection(port, hostname, () => {
       clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");

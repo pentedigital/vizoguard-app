@@ -139,28 +139,28 @@
     <div class="engine-section">
       <div class="engine-section-label">Immune System</div>
       <div class="engine-row">
-        <span class="engine-label">L1 File Monitor</span>
+        <span class="engine-label">L1 Blocklist</span>
         <div class="progress-bar">
           <div class="progress-fill" id="immune-l1-fill" style="width:0%"></div>
         </div>
         <span class="engine-pct" id="immune-l1-pct">0%</span>
       </div>
       <div class="engine-row">
-        <span class="engine-label">L2 Process Guard</span>
+        <span class="engine-label">L2 Behaviors</span>
         <div class="progress-bar">
           <div class="progress-fill" id="immune-l2-fill" style="width:0%"></div>
         </div>
         <span class="engine-pct" id="immune-l2-pct">0%</span>
       </div>
       <div class="engine-row">
-        <span class="engine-label">L3 Network</span>
+        <span class="engine-label">L3 Persistence</span>
         <div class="progress-bar">
           <div class="progress-fill" id="immune-l3-fill" style="width:0%"></div>
         </div>
         <span class="engine-pct" id="immune-l3-pct">0%</span>
       </div>
       <div class="engine-row">
-        <span class="engine-label">L4 Behavioural</span>
+        <span class="engine-label">L4 Sentinel</span>
         <div class="progress-bar">
           <div class="progress-fill" id="immune-l4-fill" style="width:0%"></div>
         </div>
@@ -200,14 +200,8 @@
       <span class="toggle-slider"></span>
     </label>
   </div>
-  <div class="settings-divider"></div>
-  <div class="settings-row">
-    <span class="settings-label">Kill Switch</span>
-    <label class="toggle">
-      <input type="checkbox" id="toggle-killswitch">
-      <span class="toggle-slider"></span>
-    </label>
-  </div>
+  <!-- Kill switch is a planned feature and has been intentionally omitted
+       to avoid misrepresenting functionality that does not yet exist. -->
   <div class="settings-divider"></div>
   <div class="settings-row">
     <span class="settings-label">Notifications</span>
@@ -360,8 +354,6 @@
       try {
         var autoConnect = await window.vizoguard.getSetting('autoConnect');
         document.getElementById('toggle-autoconnect').checked = !!autoConnect;
-        var killSwitch = await window.vizoguard.getSetting('killSwitch');
-        document.getElementById('toggle-killswitch').checked = !!killSwitch;
         var notifications = await window.vizoguard.getSetting('notifications');
         document.getElementById('toggle-notifications').checked =
           notifications === undefined ? true : !!notifications;
@@ -387,9 +379,6 @@
   // Settings toggle change handlers
   document.getElementById('toggle-autoconnect').addEventListener('change', function() {
     window.vizoguard.setSetting('autoConnect', this.checked);
-  });
-  document.getElementById('toggle-killswitch').addEventListener('change', function() {
-    window.vizoguard.setSetting('killSwitch', this.checked);
   });
   document.getElementById('toggle-notifications').addEventListener('change', function() {
     window.vizoguard.setSetting('notifications', this.checked);
