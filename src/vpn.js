@@ -236,6 +236,7 @@ class VpnManager extends EventEmitter {
 
   async disconnect() {
     if (!this._connected && !this._connecting) return;
+    const wasConnected = this._connected;
     this._connecting = false;
 
     // Clear system proxy
@@ -252,7 +253,7 @@ class VpnManager extends EventEmitter {
     }
 
     this._connected = false;
-    this.emit("disconnected");
+    if (wasConnected) this.emit("disconnected");
   }
 
   // SOCKS5 proxy that tunnels connections through Shadowsocks

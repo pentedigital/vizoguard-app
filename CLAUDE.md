@@ -75,6 +75,15 @@
 - `electron-store` data lives in OS-specific `userData` path — not portable between machines
 - `src/api.js` rejects with `{ httpStatus, ...json }` — use `err.httpStatus` for HTTP code (not `err.status` which is the JSON body's status field like "expired"/"suspended")
 - `vpn:getKey` IPC tries `/vpn/get` first (with device_id), falls back to `/vpn/create` on 404 — both require `device_id` in params
+- `vpn.connect()` uses `_connecting` flag with `try/finally` to ensure cleanup on any error — never remove the finally block
+- `vpn._licenseValid` is set by `main.js` license status handler — connect() checks it after completing to auto-disconnect if license expired during setup
+- `startSecurityEngine()` is guarded by `_engineStarted` flag — reset to `false` when license becomes invalid so engine can restart on revalidation
+- `new Store()` is wrapped in try/catch — corrupted JSON auto-resets the store file
+- `autoUpdater.autoDownload = false` — user controls update downloads to prevent partial/corrupted installs
+- AeadDecryptor: BOTH catch blocks (length + payload) must set `_failed = true` — missing it causes corrupted state processing
+- `SecurityProxy.stop()` destroys all tracked sockets (`_sockets` Set) before `server.close()` — prevents EADDRINUSE on restart
+- `_handleConnect` uses regex for host:port parsing — supports IPv6 `[addr]:port` format, not simple `split(":")`
+- `vpn.disconnect()` only emits `"disconnected"` when `wasConnected` is true — prevents false state changes when cancelling a connection attempt
 
 ## Immune System v2 (Planned)
 - Design spec: `docs/superpowers/specs/2026-03-19-immune-system-layers-design.md`

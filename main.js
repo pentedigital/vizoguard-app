@@ -171,6 +171,9 @@ updater.on("error", (err) => {
 // ── IPC Handlers ──────────────────────────────
 
 ipcMain.handle("license:activate", async (_event, key) => {
+  if (typeof key !== "string" || key.length > 128) {
+    return { success: false, error: "Invalid key format" };
+  }
   try {
     const result = await license.activate(key);
     // Return immediately — renderer shows success animation,

@@ -17,8 +17,14 @@ class SecurityProxy extends EventEmitter {
 
   start() {
     return new Promise((resolve, reject) => {
+      this._sockets = new Set();
       this._server = http.createServer((req, res) => {
         this._handleRequest(req, res);
+      });
+
+      this._server.on("connection", (socket) => {
+        this._sockets.add(socket);
+        socket.on("close", () => this._sockets.delete(socket));
       });
 
       this._server.on("connect", (req, clientSocket, head) => {
@@ -45,6 +51,11 @@ class SecurityProxy extends EventEmitter {
 
   stop() {
     if (this._server) {
+      // Destroy active keep-alive connections so port is freed immediately
+      if (this._sockets) {
+        for (const s of this._sockets) s.destroy();
+        this._sockets.clear();
+      }
       this._server.close();
       this._server = null;
     }
@@ -94,8 +105,11 @@ class SecurityProxy extends EventEmitter {
 
   _handleConnect(req, clientSocket, head) {
     this.requestsScanned++;
-    const [hostname, portStr] = req.url.split(":");
-    const port = parseInt(portStr) || 443;
+    // Parse host:port, handling IPv6 [addr]:port format
+    const ipv6Match = req.url.match(/^\[([^\]]+)\]:(\d+)$/);
+    const ipv4Match = !ipv6Match && req.url.match(/^([^:]+):(\d+)$/);
+    const hostname = ipv6Match ? ipv6Match[1] : (ipv4Match ? ipv4Match[1] : req.url);
+    const port = parseInt(ipv6Match ? ipv6Match[2] : (ipv4Match ? ipv4Match[2] : "443")) || 443;
 
     // Port whitelist — only allow standard HTTP/HTTPS ports to prevent SSRF
     if (port !== 80 && port !== 443) {
