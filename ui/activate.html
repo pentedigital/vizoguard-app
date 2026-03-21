@@ -46,10 +46,17 @@
 <script>
   // Show window controls on Windows
   if (window.vizoguard.platform !== 'darwin') {
-    document.getElementById('controls').innerHTML = `
-      <button class="titlebar-btn" onclick="window.vizoguard.minimize()">&#x2212;</button>
-      <button class="titlebar-btn" onclick="window.vizoguard.close()">&#x2715;</button>
-    `;
+    var ctrl = document.getElementById('controls');
+    var minBtn = document.createElement('button');
+    minBtn.className = 'titlebar-btn';
+    minBtn.textContent = '\u2212';
+    minBtn.addEventListener('click', function() { window.vizoguard.minimize(); });
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'titlebar-btn';
+    closeBtn.textContent = '\u2715';
+    closeBtn.addEventListener('click', function() { window.vizoguard.close(); });
+    ctrl.appendChild(minBtn);
+    ctrl.appendChild(closeBtn);
   }
 
   const input = document.getElementById('license-input');

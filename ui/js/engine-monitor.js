@@ -186,7 +186,9 @@ function _applyStats(data) {
   }
 
   // server
-  if (data.server !== undefined) {
+  if (data.serverHost !== undefined) {
+    _setText('eng-server', data.serverHost);
+  } else if (data.server !== undefined) {
     _setText('eng-server', data.server);
   }
 
@@ -226,7 +228,9 @@ function _applyStats(data) {
   }
 
   // cache entries
-  if (data.cacheEntries !== undefined) {
+  if (data.cachedEntries !== undefined) {
+    _setText('eng-cache', data.cachedEntries + ' entries');
+  } else if (data.cacheEntries !== undefined) {
     _setText('eng-cache', data.cacheEntries + ' entries');
   } else if (data.cache !== undefined) {
     _setText('eng-cache', data.cache + ' entries');

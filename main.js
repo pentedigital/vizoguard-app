@@ -39,6 +39,7 @@ const vpn = new VpnManager(store);
 const updater = new Updater();
 
 let mainWindow = null;
+let tray = null;
 
 // ── Window Management ─────────────────────────
 
@@ -134,10 +135,9 @@ function updateWeeklyStats(type) {
   const key = 'weeklyStats';
   const stats = store.get(key, { threats: 0, connections: 0, timeProtected: 0, weekStart: new Date().toISOString() });
 
-  // Reset if more than 7 days old
+  // Reset if more than 7 days old — fall through to process current increment
   if (new Date() - new Date(stats.weekStart) > 7 * 24 * 60 * 60 * 1000) {
-    store.set(key, { threats: 0, connections: 0, timeProtected: 0, weekStart: new Date().toISOString() });
-    return;
+    stats = { threats: 0, connections: 0, timeProtected: 0, weekStart: new Date().toISOString() };
   }
 
   if (type === 'threat') stats.threats++;
@@ -388,8 +388,8 @@ function getEngineMetrics() {
       stats.proxy.requestsPerSec = securityProxy._requestCount || 0;
     }
     if (typeof vpn !== 'undefined' && vpn) {
-      stats.vpn.ipMasked = vpn.isConnected?.() || false;
-      stats.vpn.dnsEncrypted = vpn.isConnected?.() || false;
+      stats.vpn.ipMasked = vpn?.isConnected || false;
+      stats.vpn.dnsEncrypted = vpn?.isConnected || false;
       stats.vpn.serverHost = vpn.getServerHost?.() || '—';
     }
     // Immune system hardcoded levels for now (actual implementation in Phase 5)
@@ -402,9 +402,25 @@ function getEngineMetrics() {
   return stats;
 }
 
+function flattenEngineMetrics() {
+  var stats = getEngineMetrics();
+  return {
+    cipher: stats.vpn.cipher,
+    serverHost: stats.vpn.serverHost,
+    ipMasked: stats.vpn.ipMasked,
+    dnsEncrypted: stats.vpn.dnsEncrypted,
+    requestsPerSec: stats.proxy.requestsPerSec,
+    cachedEntries: stats.proxy.cachedEntries,
+    threatsBlocked: stats.proxy.threatsBlocked,
+    activeConnections: stats.proxy.activeConnections,
+    threatDbLoaded: stats.proxy.threatDbLoaded,
+    layers: stats.immune.layers.map(l => l.level)
+  };
+}
+
 // Engine metrics for the bonnet view
 ipcMain.handle("engine:metrics", () => {
-  return getEngineMetrics();
+  return flattenEngineMetrics();
 });
 
 const engineIntervals = new Map();
@@ -419,7 +435,7 @@ ipcMain.on("engine:subscribe", (event) => {
       engineIntervals.delete(id);
       return;
     }
-    event.sender.send("engine:update", getEngineMetrics());
+    event.sender.send("engine:update", flattenEngineMetrics());
   }, 1000);
   engineIntervals.set(id, interval);
 });
@@ -435,6 +451,7 @@ ipcMain.on("engine:unsubscribe", (event) => {
 // ── Settings Persistence ──────────────────────
 
 ipcMain.handle("settings:get", () => store.store);
+ipcMain.handle("settings:get-one", (_e, key) => store.get(key));
 ipcMain.handle("settings:set", (_e, key, value) => { store.set(key, value); });
 
 ipcMain.handle("history:get", () => store.get('connectionHistory', []));
@@ -493,7 +510,7 @@ app.whenReady().then(async () => {
     app.dock.hide();
   }
 
-  createTray(trayCallbacks);
+  tray = createTray(trayCallbacks);
 
   if (!license.hasLicense()) {
     createWindow("activate.html");

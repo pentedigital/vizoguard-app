@@ -281,6 +281,7 @@ a:hover { opacity: 0.8; }
 .score-bar.active { background: var(--teal); }
 .score-bar.active.amber { background: var(--amber); }
 .score-bar.active.red { background: var(--red); }
+.score-bar.pulse { animation: pulse-fast 500ms ease-in-out infinite; }
 
 .score-label {
   font-size: 0.6rem;
@@ -328,7 +329,7 @@ a:hover { opacity: 0.8; }
 }
 
 .engine-view.expanded .engine-body {
-  max-height: 340px;
+  max-height: 500px;
   opacity: 1;
   overflow-y: auto;
 }

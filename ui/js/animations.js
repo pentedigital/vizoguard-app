@@ -140,7 +140,7 @@ function setVpnState(newState) {
   // -- Timer and engine updates
   if (newState === 'connected') {
     startTimer();
-    if (_engineExpanded && typeof startEngineUpdates === 'function') {
+    if (typeof startEngineUpdates === 'function') {
       startEngineUpdates();
     }
   } else {

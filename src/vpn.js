@@ -156,6 +156,10 @@ class VpnManager extends EventEmitter {
     return this._connected;
   }
 
+  getServerHost() {
+    return this._remoteHost || null;
+  }
+
   // Parse ss:// URL into components
   _parseAccessUrl(url) {
     // Format: ss://base64(method:password)@host:port/?outline=1

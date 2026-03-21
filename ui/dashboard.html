@@ -44,7 +44,7 @@
 
 <!-- 3. Connect button area -->
 <div class="connect-area">
-  <div class="connect-btn idle" id="connect-btn" onclick="toggleVpn()">
+  <div class="connect-btn idle" id="connect-btn">
     <div class="connect-ring" id="connect-ring"></div>
     <span class="connect-text" id="connect-text">Connect</span>
   </div>
@@ -69,7 +69,7 @@
 
 <!-- 6. Engine view -->
 <div class="engine-view glass" id="engine-view">
-  <div class="engine-header" onclick="toggleEngineView()">
+  <div class="engine-header" id="engine-header">
     <span class="engine-title">Security Engine</span>
     <span class="engine-chevron" id="engine-chevron">&#x25BE;</span>
   </div>
@@ -332,123 +332,13 @@
   }
 
   // ── VPN Toggle ────────────────────────────────────────────────
-
-  async function toggleVpn() {
-    var btn = document.getElementById('connect-btn');
-    var textEl = document.getElementById('connect-text');
-    btn.style.pointerEvents = 'none';
-
-    if (vpnConnected) {
-      textEl.textContent = 'Stopping...';
-      var result = await window.vizoguard.vpnDisconnect();
-      if (result.success) {
-        vpnConnected = false;
-        setVpnState(false);
-        showToast('VPN disconnected');
-      } else {
-        setVpnError();
-        showToast('Disconnect failed: ' + result.error, true);
-      }
-    } else {
-      textEl.textContent = 'Starting...';
-      setVpnConnecting();
-      var keyResult = await window.vizoguard.getVpnKey();
-      if (keyResult.error) {
-        setVpnError();
-        showToast('No VPN key: ' + keyResult.error, true);
-        btn.style.pointerEvents = '';
-        return;
-      }
-      var connectResult = await window.vizoguard.vpnConnect();
-      if (connectResult.success) {
-        vpnConnected = true;
-        setVpnState(true);
-        showToast('VPN connected');
-      } else {
-        setVpnError();
-        showToast('Connect failed: ' + (connectResult.error || 'Unknown error'), true);
-      }
-    }
-    btn.style.pointerEvents = '';
-  }
+  // Removed: toggleVpn() — animations.js addEventListener is the sole click handler
 
   // ── VPN UI state helpers ──────────────────────────────────────
-
-  function setVpnState(connected) {
-    vpnConnected = connected;
-    var btn = document.getElementById('connect-btn');
-    var textEl = document.getElementById('connect-text');
-    var dot = document.getElementById('status-dot');
-    var label = document.getElementById('status-label');
-    var warningBanner = document.getElementById('warning-banner');
-
-    warningBanner.style.display = 'none';
-
-    if (connected) {
-      btn.className = 'connect-btn connected';
-      textEl.textContent = 'Connected';
-      dot.className = 'status-dot teal';
-      label.textContent = 'Protected';
-      // start uptime timer
-      connectStart = Date.now();
-      if (connectTimer) clearInterval(connectTimer);
-      connectTimer = setInterval(function() {
-        var elapsed = Math.floor((Date.now() - connectStart) / 1000);
-        var h = Math.floor(elapsed / 3600);
-        var m = Math.floor((elapsed % 3600) / 60);
-        var s = elapsed % 60;
-        var pad = function(n) { return n < 10 ? '0' + n : String(n); };
-        document.getElementById('status-timer').textContent =
-          pad(h) + ':' + pad(m) + ':' + pad(s);
-      }, 1000);
-      // delegate to animations.js if available
-      if (typeof handleVpnState === 'function') handleVpnState({ connected: true });
-    } else {
-      btn.className = 'connect-btn idle';
-      textEl.textContent = 'Connect';
-      dot.className = 'status-dot red';
-      label.textContent = 'Unprotected';
-      document.getElementById('status-timer').textContent = '';
-      if (connectTimer) { clearInterval(connectTimer); connectTimer = null; }
-      connectStart = null;
-      if (typeof handleVpnState === 'function') handleVpnState({ connected: false });
-    }
-  }
-
-  function setVpnConnecting() {
-    var btn = document.getElementById('connect-btn');
-    var dot = document.getElementById('status-dot');
-    var label = document.getElementById('status-label');
-    btn.className = 'connect-btn connecting';
-    dot.className = 'status-dot amber';
-    label.textContent = 'Connecting';
-  }
-
-  function setVpnError() {
-    var btn = document.getElementById('connect-btn');
-    var textEl = document.getElementById('connect-text');
-    var dot = document.getElementById('status-dot');
-    var label = document.getElementById('status-label');
-    btn.className = 'connect-btn error';
-    textEl.textContent = 'Error';
-    dot.className = 'status-dot red';
-    label.textContent = 'Error';
-    setTimeout(function() {
-      setVpnState(false);
-    }, 1500);
-    if (typeof handleVpnError === 'function') handleVpnError();
-  }
+  // Removed: inline setVpnState/setVpnConnecting/setVpnError — animations.js setVpnState() is the sole handler
 
   // ── Engine view toggle ────────────────────────────────────────
-
-  function toggleEngineView() {
-    var view = document.getElementById('engine-view');
-    if (view.classList.contains('expanded')) {
-      view.classList.remove('expanded');
-    } else {
-      view.classList.add('expanded', 'visible');
-    }
-  }
+  // Removed: toggleEngineView() — engine-monitor.js toggleEngine() is the sole handler
 
   // ── Settings panel ────────────────────────────────────────────
 
@@ -583,14 +473,13 @@
   // ── IPC event listener registration ──────────────────────────
 
   window.vizoguard.onVpnState(function(data) {
-    setVpnState(data.connected);
-    if (typeof handleVpnState === 'function') handleVpnState(data);
+    vpnConnected = data.connected;
+    setVpnState(data.connected ? 'connected' : 'idle');
   });
 
   window.vizoguard.onVpnError(function(data) {
     showToast('VPN error: ' + data.message, true);
-    setVpnState(false);
-    if (typeof handleVpnError === 'function') handleVpnError(data);
+    setVpnState('error');
   });
 
   window.vizoguard.onThreatBlocked(function(data) {
@@ -602,7 +491,6 @@
       wh.textContent = 'Blocked: ' + url.substring(0, 50);
     }
     showToast('Blocked: ' + (data.url || '').substring(0, 40) + '...', true);
-    if (typeof handleThreatBlocked === 'function') handleThreatBlocked(data);
   });
 
   window.vizoguard.onConnectionsUpdate(function(data) {
@@ -691,7 +579,8 @@
 
     // VPN state
     var vpnState = await window.vizoguard.vpnStatus();
-    setVpnState(vpnState.connected);
+    vpnConnected = vpnState.connected;
+    setVpnState(vpnState.connected ? 'connected' : 'idle');
 
     // Security stats
     var stats = await window.vizoguard.getSecurityStats();

@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld("vizoguard", {
 
   // Settings persistence
   getSettings: () => ipcRenderer.invoke("settings:get"),
+  getSetting: (key) => ipcRenderer.invoke("settings:get-one", key),
   setSetting: (key, value) => ipcRenderer.invoke("settings:set", key, value),
 
   // Connection history (local-only)
