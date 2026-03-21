@@ -113,10 +113,50 @@ const trayCallbacks = {
   },
 };
 
+// ── Connection History ────────────────────────
+
+// Connection history — stored LOCALLY only, never sent to servers
+function logConnection(action, details = {}) {
+  const history = store.get('connectionHistory', []);
+  history.unshift({
+    timestamp: new Date().toISOString(),
+    action, // 'connected', 'disconnected', 'threat_blocked', 'error'
+    ...details
+  });
+  // Keep last 100 entries
+  if (history.length > 100) history.length = 100;
+  store.set('connectionHistory', history);
+}
+
+// ── Weekly Stats ──────────────────────────────
+
+function updateWeeklyStats(type) {
+  const key = 'weeklyStats';
+  const stats = store.get(key, { threats: 0, connections: 0, timeProtected: 0, weekStart: new Date().toISOString() });
+
+  // Reset if more than 7 days old
+  if (new Date() - new Date(stats.weekStart) > 7 * 24 * 60 * 60 * 1000) {
+    store.set(key, { threats: 0, connections: 0, timeProtected: 0, weekStart: new Date().toISOString() });
+    return;
+  }
+
+  if (type === 'threat') stats.threats++;
+  if (type === 'connection') stats.connections++;
+  if (type === 'time') stats.timeProtected += 60; // add 60 seconds
+  store.set(key, stats);
+}
+
+// 60-second interval to increment timeProtected while VPN is connected
+let _weeklyTimeInterval = null;
+
 // ── Security Engine Events ────────────────────
 
 // Single source of truth for threat events — proxy owns the count
 securityProxy.on("blocked", (data) => {
+  // Log domain only, not full URL
+  const domain = (() => { try { return new URL(data.url).hostname; } catch { return data.url; } })();
+  logConnection('threat_blocked', { url: domain, risk: data.risk });
+  updateWeeklyStats('threat');
   sendToRenderer("threat:blocked", {
     url: data.url,
     risk: data.risk,
@@ -135,12 +175,30 @@ immuneSystem.on("alert", (data) => {
 
 // ── VPN Events ────────────────────────────────
 
+let _vpnConnectTime = null;
+
 vpn.on("connected", () => {
+  _vpnConnectTime = Date.now();
+  const serverHost = vpn.getServerHost ? vpn.getServerHost() : undefined;
+  logConnection('connected', serverHost ? { server: serverHost } : {});
+  updateWeeklyStats('connection');
+  // Start 60-second ticker for timeProtected
+  if (_weeklyTimeInterval) clearInterval(_weeklyTimeInterval);
+  _weeklyTimeInterval = setInterval(() => {
+    if (vpn.isConnected) updateWeeklyStats('time');
+  }, 60000);
+  // Update tray tooltip with weekly stats
+  const stats = store.get('weeklyStats', { threats: 0 });
+  try { tray && tray.setToolTip && tray.setToolTip(`Vizoguard — ${stats.threats} threats blocked this week`); } catch {}
   sendToRenderer("vpn:state", { connected: true });
   updateMenu(true, trayCallbacks);
 });
 
 vpn.on("disconnected", () => {
+  const duration = _vpnConnectTime ? Math.floor((Date.now() - _vpnConnectTime) / 1000) : undefined;
+  logConnection('disconnected', duration !== undefined ? { duration } : {});
+  _vpnConnectTime = null;
+  if (_weeklyTimeInterval) { clearInterval(_weeklyTimeInterval); _weeklyTimeInterval = null; }
   sendToRenderer("vpn:state", { connected: false });
   updateMenu(false, trayCallbacks);
 });
@@ -148,6 +206,7 @@ vpn.on("disconnected", () => {
 vpn.on("error", (err) => {
   // Sanitize error — strip IP:port details before sending to renderer
   const safeMsg = (err.message || "VPN error").replace(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?/g, "[redacted]");
+  logConnection('error', { message: safeMsg });
   sendToRenderer("vpn:error", { message: safeMsg });
 });
 
@@ -377,6 +436,11 @@ ipcMain.on("engine:unsubscribe", (event) => {
 
 ipcMain.handle("settings:get", () => store.store);
 ipcMain.handle("settings:set", (_e, key, value) => { store.set(key, value); });
+
+ipcMain.handle("history:get", () => store.get('connectionHistory', []));
+ipcMain.handle("history:clear", () => { store.set('connectionHistory', []); });
+
+ipcMain.handle("stats:weekly", () => store.get('weeklyStats', { threats: 0, connections: 0, timeProtected: 0 }));
 
 ipcMain.handle("app:showDashboard", async () => {
   showPage("dashboard.html");

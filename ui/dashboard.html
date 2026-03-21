@@ -57,6 +57,13 @@
 </div>
 <div class="status-timer" id="status-timer"></div>
 
+<!-- 4b. Weekly summary bar (visible when connected or has weekly data) -->
+<div class="weekly-summary" id="weekly-summary" style="display:none">
+  <span class="weekly-item"><strong id="weekly-threats">0</strong> threats blocked</span>
+  <span class="weekly-dot">&middot;</span>
+  <span class="weekly-item"><strong id="weekly-time">0h</strong> protected</span>
+</div>
+
 <!-- 5. Warning banner (hidden by default) -->
 <div class="warning-banner" id="warning-banner" style="display:none;"></div>
 
@@ -229,6 +236,10 @@
   <button class="btn btn-sm" id="update-btn" onclick="checkUpdate()">Check for Updates</button>
   <button class="btn btn-sm btn-ghost" onclick="window.vizoguard.openExternal('mailto:support@vizoguard.com')">Contact Support</button>
   <button class="btn btn-sm btn-ghost" onclick="window.vizoguard.openExternal('https://vizoguard.com')">Visit Website</button>
+  <div class="settings-divider"></div>
+  <div class="settings-section-label">Recent Activity</div>
+  <div id="history-list" class="history-list"></div>
+  <button class="btn btn-ghost btn-sm" onclick="clearHistory()">Clear History</button>
   <div class="settings-divider" style="margin:12px 0;"></div>
   <button class="btn btn-sm btn-danger" onclick="window.vizoguard.quit()">Quit Vizoguard</button>
 </div>
@@ -470,6 +481,7 @@
 
       panel.classList.add('open');
       overlay.classList.add('open');
+      loadHistory();
     }
   }
 
@@ -492,6 +504,72 @@
   document.getElementById('toggle-notifications').addEventListener('change', function() {
     window.vizoguard.setSetting('notifications', this.checked);
   });
+
+  // ── Connection History ────────────────────────────────────────
+
+  function formatAction(entry) {
+    switch (entry.action) {
+      case 'connected':    return 'Connected' + (entry.server ? ' \u2192 ' + entry.server : '');
+      case 'disconnected': return 'Disconnected' + (entry.duration !== undefined ? ' (' + entry.duration + 's)' : '');
+      case 'threat_blocked': return 'Blocked: ' + (entry.url || '');
+      case 'error':        return 'Error: ' + (entry.message || '');
+      default:             return entry.action;
+    }
+  }
+
+  async function loadHistory() {
+    var history = await window.vizoguard.getHistory();
+    var list = document.getElementById('history-list');
+    list.textContent = ''; // clear
+    if (!history || history.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'history-item history-empty';
+      empty.textContent = 'No activity yet.';
+      list.appendChild(empty);
+      return;
+    }
+    history.slice(0, 10).forEach(function(entry) {
+      var item = document.createElement('div');
+      item.className = 'history-item';
+      var time = document.createElement('span');
+      time.className = 'history-time';
+      time.textContent = new Date(entry.timestamp).toLocaleTimeString();
+      var action = document.createElement('span');
+      action.className = 'history-action ' + entry.action;
+      action.textContent = formatAction(entry);
+      item.appendChild(time);
+      item.appendChild(action);
+      list.appendChild(item);
+    });
+  }
+
+  async function clearHistory() {
+    await window.vizoguard.clearHistory();
+    loadHistory();
+  }
+
+  // ── Weekly Stats ──────────────────────────────────────────────
+
+  async function loadWeeklyStats() {
+    try {
+      var stats = await window.vizoguard.getWeeklyStats();
+      if (!stats) return;
+      var threatsEl = document.getElementById('weekly-threats');
+      var timeEl = document.getElementById('weekly-time');
+      var summaryEl = document.getElementById('weekly-summary');
+      if (threatsEl) threatsEl.textContent = stats.threats || 0;
+      if (timeEl) {
+        var hours = Math.round((stats.timeProtected || 0) / 3600 * 10) / 10;
+        timeEl.textContent = hours + 'h';
+      }
+      // Show summary bar if there is any data
+      if (summaryEl && (stats.threats > 0 || stats.timeProtected > 0 || stats.connections > 0)) {
+        summaryEl.style.display = '';
+      }
+    } catch (e) {
+      // non-fatal
+    }
+  }
 
   // ── Check for updates ─────────────────────────────────────────
 
@@ -627,6 +705,9 @@
     // show engine view
     document.getElementById('engine-view').classList.add('visible');
 
+    // Load weekly stats on init
+    loadWeeklyStats();
+
     // periodic stats refresh
     setInterval(async function() {
       var s = await window.vizoguard.getSecurityStats();
@@ -637,6 +718,9 @@
         if (c) c.textContent = s.activeConnections || 0;
       }
     }, 10000);
+
+    // periodic weekly stats refresh (every 5 minutes)
+    setInterval(loadWeeklyStats, 5 * 60 * 1000);
   }
 
   init();

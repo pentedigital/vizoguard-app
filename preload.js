@@ -52,5 +52,12 @@ contextBridge.exposeInMainWorld("vizoguard", {
   getSettings: () => ipcRenderer.invoke("settings:get"),
   setSetting: (key, value) => ipcRenderer.invoke("settings:set", key, value),
 
+  // Connection history (local-only)
+  getHistory: () => ipcRenderer.invoke("history:get"),
+  clearHistory: () => ipcRenderer.invoke("history:clear"),
+
+  // Weekly protection stats
+  getWeeklyStats: () => ipcRenderer.invoke("stats:weekly"),
+
   platform: process.platform,
 });
