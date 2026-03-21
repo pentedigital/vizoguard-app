@@ -266,7 +266,11 @@ class VpnManager extends EventEmitter {
       this._server.on("error", (err) => {
         console.error("SOCKS proxy error:", err.message);
         this.emit("error", err);
-        if (!this._connected) reject(err);
+        if (this._connected) {
+          this.disconnect().catch(() => {});
+        } else {
+          reject(err);
+        }
       });
 
       this._server.listen(SOCKS_PORT, SOCKS_HOST, () => {

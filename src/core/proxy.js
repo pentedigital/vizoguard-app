@@ -91,8 +91,12 @@ class SecurityProxy extends EventEmitter {
       });
 
       proxyReq.on("error", () => {
-        res.writeHead(502);
-        res.end("Bad Gateway");
+        if (!res.headersSent) {
+          res.writeHead(502);
+          res.end("Bad Gateway");
+        } else {
+          res.destroy();
+        }
       });
 
       req.pipe(proxyReq);
@@ -143,6 +147,12 @@ class SecurityProxy extends EventEmitter {
       serverSocket.pipe(clientSocket);
       clientSocket.pipe(serverSocket);
     });
+
+    // Track outbound socket for clean shutdown
+    if (this._sockets) {
+      this._sockets.add(serverSocket);
+      serverSocket.on("close", () => this._sockets.delete(serverSocket));
+    }
 
     serverSocket.on("error", () => clientSocket.end());
     clientSocket.on("error", () => serverSocket.end());

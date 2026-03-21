@@ -84,6 +84,9 @@
 - `SecurityProxy.stop()` destroys all tracked sockets (`_sockets` Set) before `server.close()` — prevents EADDRINUSE on restart
 - `_handleConnect` uses regex for host:port parsing — supports IPv6 `[addr]:port` format, not simple `split(":")`
 - `vpn.disconnect()` only emits `"disconnected"` when `wasConnected` is true — prevents false state changes when cancelling a connection attempt
+- `proxyReq.on("error")` must check `res.headersSent` before writing 502 — partial upstream response triggers double-header crash
+- CONNECT tunnel `serverSocket` is tracked in `_sockets` Set for clean shutdown — without this, outbound connections leak on stop()
+- SOCKS server post-connect crash auto-calls `disconnect()` — prevents broken network state where system proxy points at dead port
 
 ## Immune System v2 (Planned)
 - Design spec: `docs/superpowers/specs/2026-03-19-immune-system-layers-design.md`
