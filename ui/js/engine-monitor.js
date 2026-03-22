@@ -314,6 +314,11 @@ function _startMessageRotation() {
   // Show first message right away
   _rotateMessage();
   _messageRotateInterval = setInterval(_rotateMessage, 12000);
+
+  // Clean up interval on page unload
+  window.addEventListener('beforeunload', function() {
+    _stopMessageRotation();
+  });
 }
 
 function _stopMessageRotation() {

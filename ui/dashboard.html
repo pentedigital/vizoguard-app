@@ -414,7 +414,8 @@
       time.className = 'history-time';
       time.textContent = new Date(entry.timestamp).toLocaleTimeString();
       var action = document.createElement('span');
-      action.className = 'history-action ' + entry.action;
+      var safeAction = ['connected','disconnected','threat_blocked','error'].includes(entry.action) ? entry.action : 'unknown';
+      action.className = 'history-action ' + safeAction;
       action.textContent = formatAction(entry);
       item.appendChild(time);
       item.appendChild(action);

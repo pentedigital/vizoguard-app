@@ -136,6 +136,7 @@ class SecurityProxy extends EventEmitter {
 
     if (result.risk === "critical" || result.risk === "high") {
       this.threatsBlocked++;
+      this.threatChecker.threatsBlocked++; // Sync with engine panel counter
       this.emit("blocked", { url: `https://${hostname}`, ...result });
       clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       clientSocket.end();
@@ -150,6 +151,14 @@ class SecurityProxy extends EventEmitter {
 
     // Allow the tunnel
     const serverSocket = net.createConnection(port, hostname, () => {
+      // Check resolved IP to prevent DNS rebinding SSRF
+      const addr = serverSocket.remoteAddress;
+      if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.0\.0\.0|::1|fc|fd)/.test(addr)) {
+        this.threatsBlocked++;
+        serverSocket.destroy();
+        clientSocket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+        return;
+      }
       clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
       serverSocket.write(head);
       serverSocket.pipe(clientSocket);

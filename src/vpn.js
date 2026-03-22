@@ -239,6 +239,11 @@ class VpnManager extends EventEmitter {
       return;
     }
 
+    // Server errored during setup — disconnect already called
+    if (!this._server) {
+      return;
+    }
+
     this._connected = true;  // Set AFTER license check passes
     this.emit("connected");
   }
@@ -346,6 +351,9 @@ class VpnManager extends EventEmitter {
           return;
         }
 
+        // Pause client to avoid dropping data between handshake and tunnel setup
+        client.pause();
+
         // Connect through the Shadowsocks server
         this._tunnelConnection(client, destHost, destPort);
       });
@@ -367,6 +375,18 @@ class VpnManager extends EventEmitter {
     this._sockets.add(remote);
     remote.on('close', () => this._sockets.delete(remote));
 
+    // Register client data handler immediately (before remote connects) to capture buffered data
+    client.on("data", (chunk) => {
+      // Split into max 0x3FFF byte chunks per Shadowsocks spec
+      let offset = 0;
+      while (offset < chunk.length) {
+        const size = Math.min(chunk.length - offset, 0x3FFF);
+        const encrypted = aeadEncrypt(subkey, encNonce, chunk.slice(offset, offset + size), info.cipher, info.tagLen);
+        remote.write(encrypted);
+        offset += size;
+      }
+    });
+
     remote.on('connect', () => {
       // Build Shadowsocks address header
       const addrHeader = this._buildAddressHeader(destHost, destPort);
@@ -379,17 +399,8 @@ class VpnManager extends EventEmitter {
       const reply = Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
       client.write(reply);
 
-      // Encrypt client -> remote
-      client.on("data", (chunk) => {
-        // Split into max 0x3FFF byte chunks per Shadowsocks spec
-        let offset = 0;
-        while (offset < chunk.length) {
-          const size = Math.min(chunk.length - offset, 0x3FFF);
-          const encrypted = aeadEncrypt(subkey, encNonce, chunk.slice(offset, offset + size), info.cipher, info.tagLen);
-          remote.write(encrypted);
-          offset += size;
-        }
-      });
+      // Resume client now that data handler is registered
+      client.resume();
 
       // Decrypt remote -> client
       // Derive server's subkey from server salt (first saltLen bytes of response)
