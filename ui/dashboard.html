@@ -585,22 +585,11 @@
     // Load weekly stats on init
     loadWeeklyStats();
 
-    // periodic stats refresh
-    var _statsInterval = setInterval(async function() {
-      var s = await window.vizoguard.getSecurityStats();
-      if (s) {
-        var t = document.getElementById('eng-threats');
-        if (t) t.textContent = s.threatsBlocked || 0;
-        var c = document.getElementById('eng-connections');
-        if (c) c.textContent = s.activeConnections || 0;
-      }
-    }, 10000);
-
     // periodic weekly stats refresh (every 5 minutes)
+    // eng-threats and eng-connections are updated by 1s engine:subscribe push — no polling needed
     var _weeklyInterval = setInterval(loadWeeklyStats, 5 * 60 * 1000);
 
     window.addEventListener('beforeunload', function() {
-      clearInterval(_statsInterval);
       clearInterval(_weeklyInterval);
     });
   }

@@ -263,10 +263,9 @@ class VpnManager extends EventEmitter {
 
     // Stop SOCKS5 server
     if (this._server) {
-      await new Promise(resolve => {
-        this._server.close(resolve);
-        this._server = null;
-      });
+      const srv = this._server;
+      this._server = null;
+      await new Promise(resolve => srv.close(resolve));
     }
 
     this._connected = false;
@@ -448,9 +447,16 @@ class VpnManager extends EventEmitter {
     } else if (isIpv6) {
       header = Buffer.alloc(19);
       header[0] = 0x04; // IPv6
-      const groups = host.split(":").map((g) => parseInt(g, 16) || 0);
+      // Expand compressed IPv6 (e.g., ::1 → 0:0:0:0:0:0:0:1)
+      const full = host.includes('::') ? (() => {
+        const [left, right] = host.split('::');
+        const l = left ? left.split(':') : [];
+        const r = right ? right.split(':') : [];
+        const fill = Array(8 - l.length - r.length).fill('0');
+        return [...l, ...fill, ...r];
+      })() : host.split(':');
       for (let i = 0; i < 8; i++) {
-        header.writeUInt16BE(groups[i] || 0, 1 + i * 2);
+        header.writeUInt16BE(parseInt(full[i] || '0', 16), 1 + i * 2);
       }
       header.writeUInt16BE(port, 17);
     } else {

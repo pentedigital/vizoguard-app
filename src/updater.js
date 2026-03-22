@@ -13,9 +13,8 @@ class Updater extends EventEmitter {
     });
 
     autoUpdater.on("update-available", (info) => {
-      console.log(`Update available: ${info.version}`);
       this.emit("available", info);
-      autoUpdater.downloadUpdate();  // Start downloading
+      // Download triggered by user via update:install IPC — not automatic
     });
 
     autoUpdater.on("update-not-available", () => {
