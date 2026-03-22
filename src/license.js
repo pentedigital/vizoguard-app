@@ -40,7 +40,9 @@ class LicenseManager {
   isGracePeriodValid() {
     const lastCheck = this.store.get("license.lastSuccessfulCheck");
     if (!lastCheck) return false;
-    return Date.now() - new Date(lastCheck).getTime() < GRACE_PERIOD_MS;
+    const elapsed = Date.now() - new Date(lastCheck).getTime();
+    if (elapsed < 0) return false; // clock skew
+    return elapsed < GRACE_PERIOD_MS;
   }
 
   isExpired() {
