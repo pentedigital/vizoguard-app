@@ -7,7 +7,7 @@
 - VPN client: `src/vpn.js` — Shadowsocks/Outline protocol via `ss://` URLs
 - License management: `src/license.js`
 - Auto-updater: `src/updater.js` — GitHub Releases feed (HTTPS)
-- API client: `src/api.js` — all backend calls, base URL: `https://vizoguard.com/api`
+- API client: `src/api.js` — all backend calls, base URL: `https://vizoguard.com/api`, exponential backoff retry (2 retries, 1s/2s for 5xx/network errors)
 - Persistent storage: `electron-store` (user preferences, license data)
 - System tray: `src/tray.js`
 - UI: `ui/` — dashboard, activate, expired pages
@@ -74,6 +74,8 @@
 - macOS entitlements (`build/entitlements.mac.plist`) required for code signing — missing entitlements will cause notarization failure
 - `electron-store` data lives in OS-specific `userData` path — not portable between machines
 - `src/api.js` rejects with `{ httpStatus, ...json }` — use `err.httpStatus` for HTTP code (not `err.status` which is the JSON body's status field like "expired"/"suspended")
+- `src/api.js` retries 5xx and network errors (max 2 retries, 1s/2s backoff) — 4xx errors throw immediately
+- License key regex is uppercase hex only (`/^VIZO-[0-9A-F]{4}(-[0-9A-F]{4}){3}$/`) — must match server validation
 - `vpn:getKey` IPC tries `/vpn/get` first (with device_id), falls back to `/vpn/create` on 404 — both require `device_id` in params
 - `vpn.connect()` uses `_connecting` flag with `try/finally` to ensure cleanup on any error — never remove the finally block
 - `vpn._licenseValid` is set by `main.js` license status handler — connect() checks it after completing to auto-disconnect if license expired during setup
