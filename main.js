@@ -467,8 +467,15 @@ ipcMain.handle("settings:get", () => ({
   autoConnect: store.get('autoConnect', false),
   notifications: store.get('notifications', true),
 }));
-ipcMain.handle("settings:get-one", (_e, key) => store.get(key));
-ipcMain.handle("settings:set", (_e, key, value) => { store.set(key, value); });
+const ALLOWED_SETTINGS = ['autoConnect', 'notifications', 'ui.engineExpanded', 'ui.settingsOpen'];
+ipcMain.handle("settings:get-one", (_e, key) => {
+  if (!ALLOWED_SETTINGS.includes(key)) return undefined;
+  return store.get(key);
+});
+ipcMain.handle("settings:set", (_e, key, value) => {
+  if (!ALLOWED_SETTINGS.includes(key)) return;
+  store.set(key, value);
+});
 
 ipcMain.handle("history:get", () => store.get('connectionHistory', []));
 ipcMain.handle("history:clear", () => { store.set('connectionHistory', []); });

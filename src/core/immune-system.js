@@ -12,6 +12,7 @@ class ImmuneSystem extends EventEmitter {
     this._timer = null;
     this._hashes = new Map(); // filepath -> sha256
     this._protectedFiles = [];
+    this._alerted = new Set(); // Track already-alerted files to prevent infinite toasts
     this.events = [];
   }
 
@@ -88,8 +89,9 @@ class ImmuneSystem extends EventEmitter {
         continue;
       }
 
-      if (storedHash && currentHash !== storedHash) {
-        // File was modified — keep original hash so we re-alert while tampered
+      if (storedHash && currentHash !== storedHash && !this._alerted.has(file)) {
+        this._alerted.add(file);
+        // File was modified — alert once per session per file
         const event = { type: "modified", file: path.basename(file), time: new Date().toISOString() };
         this.events.push(event);
         this.emit("alert", event);

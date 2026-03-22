@@ -586,7 +586,7 @@
     loadWeeklyStats();
 
     // periodic stats refresh
-    setInterval(async function() {
+    var _statsInterval = setInterval(async function() {
       var s = await window.vizoguard.getSecurityStats();
       if (s) {
         var t = document.getElementById('eng-threats');
@@ -597,7 +597,12 @@
     }, 10000);
 
     // periodic weekly stats refresh (every 5 minutes)
-    setInterval(loadWeeklyStats, 5 * 60 * 1000);
+    var _weeklyInterval = setInterval(loadWeeklyStats, 5 * 60 * 1000);
+
+    window.addEventListener('beforeunload', function() {
+      clearInterval(_statsInterval);
+      clearInterval(_weeklyInterval);
+    });
   }
 
   init();

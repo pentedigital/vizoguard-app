@@ -29,6 +29,8 @@ function evpBytesToKey(password, keyLen) {
 }
 
 // HKDF-SHA1 subkey derivation (Shadowsocks AEAD spec)
+// Shadowsocks HKDF-SHA1: uses salt as HMAC key (matches Shadowsocks/Outline convention,
+// differs from RFC 5869 which uses salt as HMAC key and IKM as data — same result here)
 function hkdfSha1(key, salt, info, length) {
   // Extract
   const prk = crypto.createHmac("sha1", salt).update(key).digest();
@@ -200,7 +202,7 @@ class VpnManager extends EventEmitter {
       try {
         config = this._parseAccessUrl(accessUrl);
       } catch (e) {
-        throw new Error(`Invalid VPN configuration: ${e.message}`);
+        throw new Error("Invalid VPN configuration");  // Don't include e.message (may contain credentials)
       }
 
       this._remoteHost = config.host;
@@ -227,18 +229,17 @@ class VpnManager extends EventEmitter {
         throw err;
       }
 
-      this._connected = true;
     } finally {
       this._connecting = false;
     }
 
     // Check if license was invalidated during connect (#26)
     if (this._licenseValid === false) {
-      this.emit("disconnected");
       await this.disconnect().catch(() => {});
       return;
     }
 
+    this._connected = true;  // Set AFTER license check passes
     this.emit("connected");
   }
 
@@ -262,8 +263,10 @@ class VpnManager extends EventEmitter {
 
     // Stop SOCKS5 server
     if (this._server) {
-      this._server.close();
-      this._server = null;
+      await new Promise(resolve => {
+        this._server.close(resolve);
+        this._server = null;
+      });
     }
 
     this._connected = false;
@@ -333,7 +336,11 @@ class VpnManager extends EventEmitter {
         } else if (addrType === 0x04) {
           // IPv6 — need at least 22 bytes
           if (request.length < 22) { client.end(); return; }
-          destHost = Array.from(request.slice(4, 20)).map((b) => b.toString(16).padStart(2, "0")).join(":");
+          const groups = [];
+          for (let i = 4; i < 20; i += 2) {
+            groups.push(((request[i] << 8) | request[i + 1]).toString(16));
+          }
+          destHost = groups.join(':');
           destPort = request.readUInt16BE(20);
         } else {
           client.end();
@@ -357,7 +364,11 @@ class VpnManager extends EventEmitter {
     const encNonce = Buffer.alloc(info.nonceLen);
 
     // Connect to the Shadowsocks server
-    const remote = net.createConnection(this._remotePort, this._remoteHost, () => {
+    const remote = net.createConnection(this._remotePort, this._remoteHost);
+    this._sockets.add(remote);
+    remote.on('close', () => this._sockets.delete(remote));
+
+    remote.on('connect', () => {
       // Build Shadowsocks address header
       const addrHeader = this._buildAddressHeader(destHost, destPort);
 

@@ -117,6 +117,7 @@ class SecurityProxy extends EventEmitter {
 
     // Port whitelist — only allow standard HTTP/HTTPS ports to prevent SSRF
     if (port !== 80 && port !== 443) {
+      this.threatsBlocked++;
       clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       clientSocket.end();
       return;
@@ -124,6 +125,7 @@ class SecurityProxy extends EventEmitter {
 
     // Block loopback and private IP ranges
     if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.0\.0\.0|localhost$|\[::1\])/i.test(hostname)) {
+      this.threatsBlocked++;
       clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       clientSocket.end();
       return;
@@ -166,7 +168,7 @@ class SecurityProxy extends EventEmitter {
 
   _blockPage(url, result) {
     const safeUrl = url.replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
-    const reasons = result.checks.map((c) => c.detail).join(", ");
+    const reasons = (result.checks || []).map((c) => c.detail).join(", ");
     return `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>body{background:#000;color:#fff;font-family:Inter,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
 .box{text-align:center;max-width:480px;padding:40px}.shield{font-size:48px;margin-bottom:16px}

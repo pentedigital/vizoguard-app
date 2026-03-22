@@ -13,6 +13,7 @@ var _timerInterval   = null;
 var _connectedSince  = null;
 var _errorClearTimer = null;
 var _engineExpanded  = false;
+var _engineObserver  = null;
 
 /* ── DOM helpers ──────────────────────────────────────────── */
 
@@ -301,10 +302,13 @@ function stopTimer() {
   function track() {
     var engineView = _el('engine-view');
     if (!engineView) return;
-    var observer = new MutationObserver(function() {
+    _engineObserver = new MutationObserver(function() {
       _engineExpanded = engineView.classList.contains('expanded');
     });
-    observer.observe(engineView, { attributes: true, attributeFilter: ['class'] });
+    _engineObserver.observe(engineView, { attributes: true, attributeFilter: ['class'] });
+    window.addEventListener('beforeunload', function() {
+      if (_engineObserver) { _engineObserver.disconnect(); _engineObserver = null; }
+    });
   }
 
   if (document.readyState === 'loading') {
