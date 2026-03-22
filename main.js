@@ -385,7 +385,16 @@ function getEngineMetrics() {
       stats.immune.layers[1].level = connectionMonitor.activeConnections > 0 ? 64 : 0;
     }
     if (typeof securityProxy !== 'undefined' && securityProxy) {
-      stats.proxy.requestsPerSec = securityProxy.requestsScanned || 0;
+      const now = Date.now();
+      const current = securityProxy.requestsScanned || 0;
+      if (!securityProxy._lastSampleTime) {
+        securityProxy._lastSampleTime = now;
+        securityProxy._lastSampleCount = current;
+      }
+      const elapsed = (now - securityProxy._lastSampleTime) / 1000;
+      stats.proxy.requestsPerSec = elapsed > 0 ? Math.round((current - securityProxy._lastSampleCount) / elapsed) : 0;
+      securityProxy._lastSampleTime = now;
+      securityProxy._lastSampleCount = current;
     }
     if (typeof vpn !== 'undefined' && vpn) {
       stats.vpn.ipMasked = vpn?.isConnected || false;

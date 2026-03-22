@@ -82,10 +82,13 @@ class ImmuneSystem extends EventEmitter {
       const storedHash = this._hashes.get(file);
 
       if (!currentHash) {
-        // File was deleted
-        const event = { type: "deleted", file: path.basename(file), time: new Date().toISOString() };
-        this.events.push(event);
-        this.emit("alert", event);
+        // File was deleted — alert once per session per file
+        if (!this._alerted.has(file)) {
+          this._alerted.add(file);
+          const event = { type: "deleted", file: path.basename(file), time: new Date().toISOString() };
+          this.events.push(event);
+          this.emit("alert", event);
+        }
         continue;
       }
 

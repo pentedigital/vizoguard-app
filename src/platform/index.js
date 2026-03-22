@@ -8,5 +8,6 @@ if (process.platform === "win32") {
     getDeviceId: async () => { throw new Error(`Unsupported platform: ${process.platform}`); },
     setProxy: async () => {},
     clearProxy: async () => {},
+    getConnections: async () => [],
   };
 }
