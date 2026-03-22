@@ -425,8 +425,14 @@ ipcMain.handle("engine:metrics", () => {
 const engineIntervals = new Map();
 
 ipcMain.on("engine:subscribe", (event) => {
+  // Single-window app: clear ALL existing intervals on new subscribe
+  // to prevent accumulation when pages navigate
+  for (const [oldId, oldInterval] of engineIntervals) {
+    clearInterval(oldInterval);
+  }
+  engineIntervals.clear();
+
   const id = event.sender.id;
-  if (engineIntervals.has(id)) clearInterval(engineIntervals.get(id));
 
   const interval = setInterval(() => {
     if (event.sender.isDestroyed()) {
@@ -437,6 +443,14 @@ ipcMain.on("engine:subscribe", (event) => {
     event.sender.send("engine:update", flattenEngineMetrics());
   }, 1000);
   engineIntervals.set(id, interval);
+
+  // Clean up when the webContents is destroyed
+  event.sender.once("destroyed", () => {
+    if (engineIntervals.has(id)) {
+      clearInterval(engineIntervals.get(id));
+      engineIntervals.delete(id);
+    }
+  });
 });
 
 ipcMain.on("engine:unsubscribe", (event) => {

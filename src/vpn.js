@@ -222,7 +222,9 @@ class VpnManager extends EventEmitter {
           this._server.close();
           this._server = null;
         }
-        throw new Error(`Failed to set system proxy: ${e.message}`);
+        const err = new Error(`Failed to set system proxy: ${e.message}`);
+        this.emit("error", err);
+        throw err;
       }
 
       this._connected = true;
@@ -232,6 +234,7 @@ class VpnManager extends EventEmitter {
 
     // Check if license was invalidated during connect (#26)
     if (this._licenseValid === false) {
+      this.emit("disconnected");
       await this.disconnect().catch(() => {});
       return;
     }
