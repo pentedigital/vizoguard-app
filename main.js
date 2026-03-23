@@ -554,6 +554,22 @@ license.onStatusChange((status) => {
   }
 });
 
+// ── Crash Safety ─────────────────────────────
+
+// Catch uncaught exceptions — clean up proxy and notify UI instead of crashing
+process.on('uncaughtException', (err) => {
+  console.error("Uncaught exception:", err);
+  // Clear proxy to prevent internet lockout
+  try { require("./src/platform").clearProxy(); } catch {}
+  // Notify UI so it doesn't stay stuck on "Securing..."
+  sendToRenderer("vpn:error", { message: err.message || "Unexpected error" });
+  sendToRenderer("vpn:state", { connected: false });
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error("Unhandled rejection:", reason);
+});
+
 // ── App Lifecycle ─────────────────────────────
 
 app.whenReady().then(async () => {

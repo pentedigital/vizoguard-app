@@ -280,7 +280,13 @@ function stopTimer() {
       // idle or error → connect
       setVpnState('connecting');
       if (window.vizoguard && typeof window.vizoguard.vpnConnect === 'function') {
-        window.vizoguard.vpnConnect();
+        window.vizoguard.vpnConnect().then(function(result) {
+          if (result && !result.success) {
+            setVpnState('error');
+          }
+        }).catch(function() {
+          setVpnState('error');
+        });
       }
     });
   }

@@ -9,12 +9,46 @@ const platform = require("./platform");
 const SOCKS_PORT = 1080;
 const SOCKS_HOST = "127.0.0.1";
 
-// AEAD cipher specs
+// AEAD cipher specs — maps Shadowsocks names to Node.js crypto names
 const CIPHER_INFO = {
   "chacha20-ietf-poly1305": { keyLen: 32, saltLen: 32, nonceLen: 12, tagLen: 16, cipher: "chacha20-poly1305" },
   "aes-256-gcm": { keyLen: 32, saltLen: 32, nonceLen: 12, tagLen: 16, cipher: "aes-256-gcm" },
   "aes-128-gcm": { keyLen: 16, saltLen: 16, nonceLen: 12, tagLen: 16, cipher: "aes-128-gcm" },
 };
+
+// Preferred cipher → fallback chain (same key size so they're interchangeable)
+const CIPHER_FALLBACK = {
+  "chacha20-poly1305": "aes-256-gcm",
+};
+
+// Actually test that a cipher works (getCiphers() can lie on some Electron/BoringSSL builds)
+function testCipher(nodeCipherName, keyLen, nonceLen, tagLen) {
+  try {
+    const c = crypto.createCipheriv(nodeCipherName, Buffer.alloc(keyLen), Buffer.alloc(nonceLen), { authTagLength: tagLen });
+    c.update(Buffer.alloc(1));
+    c.final();
+    c.getAuthTag();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Resolve a working cipher — try the requested one, fall back if needed
+function resolveCipher(info) {
+  if (testCipher(info.cipher, info.keyLen, info.nonceLen, info.tagLen)) {
+    return info.cipher;
+  }
+  const fallback = CIPHER_FALLBACK[info.cipher];
+  if (fallback) {
+    const fbInfo = Object.values(CIPHER_INFO).find(c => c.cipher === fallback);
+    if (fbInfo && fbInfo.keyLen === info.keyLen && testCipher(fallback, fbInfo.keyLen, fbInfo.nonceLen, fbInfo.tagLen)) {
+      console.log(`Cipher ${info.cipher} unavailable, falling back to ${fallback}`);
+      return fallback;
+    }
+  }
+  throw new Error(`No supported cipher available (tried ${info.cipher}${fallback ? ', ' + fallback : ''}) — update the app or OS`);
+}
 
 // Derive key from password using EVP_BytesToKey (Shadowsocks standard)
 function evpBytesToKey(password, keyLen) {
@@ -245,7 +279,8 @@ class VpnManager extends EventEmitter {
     this._remotePort = config.port;
     this._password = config.password;
     this._method = config.method;
-    this._cipherInfo = CIPHER_INFO[config.method];
+    this._cipherInfo = { ...CIPHER_INFO[config.method] };
+    this._cipherInfo.cipher = resolveCipher(this._cipherInfo);
     this._masterKey = evpBytesToKey(config.password, this._cipherInfo.keyLen);
 
     // Verify the VPN server is reachable before committing system proxy
@@ -430,6 +465,7 @@ class VpnManager extends EventEmitter {
 
   _tunnelConnection(client, destHost, destPort) {
     const info = this._cipherInfo;
+    if (!info) { client.end(); return; }
 
     // Generate random salt for this connection
     const salt = crypto.randomBytes(info.saltLen);
@@ -445,23 +481,36 @@ class VpnManager extends EventEmitter {
 
     // Register client data handler immediately (before remote connects) to capture buffered data
     client.on("data", (chunk) => {
-      // Split into max 0x3FFF byte chunks per Shadowsocks spec
-      let offset = 0;
-      while (offset < chunk.length) {
-        const size = Math.min(chunk.length - offset, 0x3FFF);
-        const encrypted = aeadEncrypt(subkey, encNonce, chunk.slice(offset, offset + size), info.cipher, info.tagLen);
-        remote.write(encrypted);
-        offset += size;
+      try {
+        // Split into max 0x3FFF byte chunks per Shadowsocks spec
+        let offset = 0;
+        while (offset < chunk.length) {
+          const size = Math.min(chunk.length - offset, 0x3FFF);
+          const encrypted = aeadEncrypt(subkey, encNonce, chunk.slice(offset, offset + size), info.cipher, info.tagLen);
+          remote.write(encrypted);
+          offset += size;
+        }
+      } catch (e) {
+        console.error("Encrypt error:", e.message);
+        remote.destroy();
+        client.end();
       }
     });
 
     remote.on('connect', () => {
-      // Build Shadowsocks address header
-      const addrHeader = this._buildAddressHeader(destHost, destPort);
+      try {
+        // Build Shadowsocks address header
+        const addrHeader = this._buildAddressHeader(destHost, destPort);
 
-      // Send salt + encrypted address header as the first message
-      const encryptedHeader = aeadEncrypt(subkey, encNonce, addrHeader, info.cipher, info.tagLen);
-      remote.write(Buffer.concat([salt, encryptedHeader]));
+        // Send salt + encrypted address header as the first message
+        const encryptedHeader = aeadEncrypt(subkey, encNonce, addrHeader, info.cipher, info.tagLen);
+        remote.write(Buffer.concat([salt, encryptedHeader]));
+      } catch (e) {
+        console.error("Tunnel setup error:", e.message);
+        remote.destroy();
+        client.end();
+        return;
+      }
 
       // Send SOCKS5 success response
       const reply = Buffer.from([0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
@@ -477,23 +526,29 @@ class VpnManager extends EventEmitter {
       let initialBuffer = Buffer.alloc(0);
 
       remote.on("data", (chunk) => {
-        if (!serverSaltReceived) {
-          initialBuffer = Buffer.concat([initialBuffer, chunk]);
-          if (initialBuffer.length < info.saltLen) return;
+        try {
+          if (!serverSaltReceived) {
+            initialBuffer = Buffer.concat([initialBuffer, chunk]);
+            if (initialBuffer.length < info.saltLen) return;
 
-          const serverSalt = initialBuffer.slice(0, info.saltLen);
-          const remaining = initialBuffer.slice(info.saltLen);
-          const serverSubkey = hkdfSha1(this._masterKey, serverSalt, "ss-subkey", info.keyLen);
-          serverDecryptor = new AeadDecryptor(serverSubkey, info.cipher, info.tagLen);
-          serverSaltReceived = true;
+            const serverSalt = initialBuffer.slice(0, info.saltLen);
+            const remaining = initialBuffer.slice(info.saltLen);
+            const serverSubkey = hkdfSha1(this._masterKey, serverSalt, "ss-subkey", info.keyLen);
+            serverDecryptor = new AeadDecryptor(serverSubkey, info.cipher, info.tagLen);
+            serverSaltReceived = true;
 
-          if (remaining.length > 0) {
-            const decrypted = serverDecryptor.update(remaining);
+            if (remaining.length > 0) {
+              const decrypted = serverDecryptor.update(remaining);
+              for (const buf of decrypted) client.write(buf);
+            }
+          } else {
+            const decrypted = serverDecryptor.update(chunk);
             for (const buf of decrypted) client.write(buf);
           }
-        } else {
-          const decrypted = serverDecryptor.update(chunk);
-          for (const buf of decrypted) client.write(buf);
+        } catch (e) {
+          console.error("Decrypt error:", e.message);
+          remote.destroy();
+          client.end();
         }
       });
     });
@@ -533,13 +588,19 @@ class VpnManager extends EventEmitter {
       sock.on("connect", () => {
         // TCP connect succeeded — now verify Shadowsocks handshake by sending
         // a salt + encrypted request for a test target (1.1.1.1:80)
-        const info = this._cipherInfo;
-        const salt = crypto.randomBytes(info.saltLen);
-        const subkey = hkdfSha1(this._masterKey, salt, "ss-subkey", info.keyLen);
-        const nonce = Buffer.alloc(info.nonceLen);
-        const addrHeader = this._buildAddressHeader("1.1.1.1", 80);
-        const encrypted = aeadEncrypt(subkey, nonce, addrHeader, info.cipher, info.tagLen);
-        sock.write(Buffer.concat([salt, encrypted]));
+        try {
+          const info = this._cipherInfo;
+          const salt = crypto.randomBytes(info.saltLen);
+          const subkey = hkdfSha1(this._masterKey, salt, "ss-subkey", info.keyLen);
+          const nonce = Buffer.alloc(info.nonceLen);
+          const addrHeader = this._buildAddressHeader("1.1.1.1", 80);
+          const encrypted = aeadEncrypt(subkey, nonce, addrHeader, info.cipher, info.tagLen);
+          sock.write(Buffer.concat([salt, encrypted]));
+        } catch (e) {
+          cleanup();
+          reject(new Error(`Cipher error: ${e.message}`));
+          return;
+        }
 
         // If server responds (even a few bytes), tunnel works
         dataTimeout = setTimeout(() => {
