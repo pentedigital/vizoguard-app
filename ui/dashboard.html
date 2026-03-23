@@ -444,6 +444,12 @@
   window.vizoguard.onVpnState(function(data) {
     vpnConnected = data.connected;
     setVpnState(data.connected ? 'connected' : 'idle');
+
+    // Windows proxy scope notice (show once per session)
+    if (data.connected && window.vizoguard.platform === 'win32' && !window._winProxyNoticeShown) {
+      window._winProxyNoticeShown = true;
+      showToast('VPN protects browsers and most apps. Firefox uses its own proxy settings.');
+    }
   });
 
   window.vizoguard.onVpnError(function(data) {

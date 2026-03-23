@@ -18,9 +18,8 @@ function getDeviceId() {
 }
 
 async function setProxy(host, port) {
-  // Set SOCKS proxy via IE/WinInet registry. Note: this only affects IE-legacy and
-  // Chromium-based browsers. System-wide SOCKS requires `netsh winhttp set proxy`
-  // which needs admin privileges. This is a known limitation for non-admin installs.
+  // WinInet registry (covers Chrome, Edge, Electron, IE)
+  // Note: Firefox uses its own proxy settings and cannot be controlled from outside.
   await execFileAsync("reg", [
     "add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
     "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "1", "/f",
@@ -29,6 +28,14 @@ async function setProxy(host, port) {
     "add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
     "/v", "ProxyServer", "/t", "REG_SZ", "/d", `socks=${host}:${port}`, "/f",
   ]);
+
+  // WinHTTP proxy (covers .NET, PowerShell, many system apps)
+  try {
+    await execFileAsync("netsh", ["winhttp", "set", "proxy", `socks=${host}:${port}`]);
+  } catch (e) {
+    // netsh winhttp may require admin — non-fatal if it fails
+    console.warn("WinHTTP proxy set failed (may need admin):", e.message);
+  }
 }
 
 async function clearProxy() {
@@ -36,6 +43,12 @@ async function clearProxy() {
     "add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
     "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f",
   ]);
+
+  try {
+    await execFileAsync("netsh", ["winhttp", "reset", "proxy"]);
+  } catch (e) {
+    console.warn("WinHTTP proxy reset failed:", e.message);
+  }
 }
 
 async function getConnections() {

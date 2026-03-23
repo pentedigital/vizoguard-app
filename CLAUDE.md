@@ -52,6 +52,34 @@
 - Installers served at `vizoguard.com/downloads/Vizoguard-latest.dmg` and `.exe`
 - Deploy SSH key: ed25519, stored as `VPS_SSH_PRIVATE_KEY` GitHub secret
 
+## Code Signing
+
+### macOS (required for Gatekeeper)
+Add these GitHub Actions secrets:
+- `MAC_CERTIFICATE_P12_BASE64` — Developer ID Application certificate (base64)
+- `MAC_CERTIFICATE_PASSWORD` — Certificate password
+- `APPLE_ID` — Apple Developer account email
+- `APPLE_APP_SPECIFIC_PASSWORD` — App-specific password for notarization
+- `APPLE_TEAM_ID` — Apple Developer Team ID
+
+Generate certificate: Apple Developer > Certificates > Developer ID Application
+Export as .p12, base64 encode: `base64 -i cert.p12 | pbcopy`
+
+### Windows (required for SmartScreen)
+Add these GitHub Actions secrets:
+- `WIN_CERTIFICATE_P12_BASE64` — Authenticode certificate (base64)
+- `WIN_CERTIFICATE_PASSWORD` — Certificate password
+
+Options:
+- **EV certificate** ($200-400/yr) — eliminates SmartScreen immediately
+- **OV certificate** ($100-200/yr) — builds reputation over time
+- Recommended providers: DigiCert, Sectigo, GlobalSign
+
+### Without certificates
+Apps will show:
+- macOS: "cannot be opened because the developer cannot be verified" (right-click > Open to bypass)
+- Windows: SmartScreen "Windows protected your PC" (click "More info" > "Run anyway")
+
 ## IPC Channels
 - `license:activate`, `license:status` — license management
 - `vpn:connect`, `vpn:disconnect`, `vpn:status`, `vpn:getKey` — VPN control
