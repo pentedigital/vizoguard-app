@@ -33,6 +33,7 @@ async function clearProxy() {
   for (const service of services) {
     try {
       await execFileAsync("/usr/sbin/networksetup", ["-setsocksfirewallproxystate", service, "off"]);
+      await execFileAsync("/usr/sbin/networksetup", ["-setsocksfirewallproxy", service, "", "0"]);
     } catch { /* ignore */ }
   }
 }

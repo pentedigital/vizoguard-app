@@ -153,6 +153,8 @@ class VpnManager extends EventEmitter {
     this._masterKey = null;
     this._cipherInfo = null;
     this._sockets = new Set();
+    this._tunnelFailures = 0;
+    this._tunnelHealthInterval = null;
   }
 
   get isConnected() {
@@ -194,58 +196,86 @@ class VpnManager extends EventEmitter {
     if (this._connected || this._connecting) return;
     this._connecting = true;
 
+    // 15-second guard for entire connect flow
+    let connectTimeoutId;
+    const connectTimeout = new Promise((_, reject) => {
+      connectTimeoutId = setTimeout(() => reject(new Error("Connection timed out — could not establish VPN")), 15000);
+    });
+
     try {
-      const accessUrl = this.store.get("license.vpnAccessUrl");
-      if (!accessUrl) throw new Error("No VPN access key configured");
-
-      let config;
-      try {
-        config = this._parseAccessUrl(accessUrl);
-      } catch (e) {
-        throw new Error("Invalid VPN configuration");  // Don't include e.message (may contain credentials)
-      }
-
-      this._remoteHost = config.host;
-      this._remotePort = config.port;
-      this._password = config.password;
-      this._method = config.method;
-      this._cipherInfo = CIPHER_INFO[config.method];
-      this._masterKey = evpBytesToKey(config.password, this._cipherInfo.keyLen);
-
-      // Start SOCKS5 proxy server
-      await this._startSocksProxy();
-
-      // Set system proxy to our local SOCKS5
-      try {
-        await platform.setProxy(SOCKS_HOST, SOCKS_PORT);
-      } catch (e) {
-        // Rollback: stop SOCKS server if proxy setup fails
-        if (this._server) {
-          this._server.close();
-          this._server = null;
-        }
-        const err = new Error(`Failed to set system proxy: ${e.message}`);
-        this.emit("error", err);
-        throw err;
-      }
-
+      await Promise.race([this._connectInner(), connectTimeout]);
+    } catch (e) {
+      await this._rollback();
+      throw e;
     } finally {
+      clearTimeout(connectTimeoutId);
       this._connecting = false;
     }
 
     // Check if license was invalidated during connect (#26)
     if (this._licenseValid === false) {
-      await this.disconnect().catch(() => {});
-      return;
+      await this._rollback();
+      throw new Error("License expired during connection");
     }
 
-    // Server errored during setup — disconnect already called
+    // Server errored during setup — disconnect already called, clean up proxy
     if (!this._server) {
+      await this._rollback();
       return;
     }
 
     this._connected = true;  // Set AFTER license check passes
+    this._tunnelFailures = 0;
+    this._startTunnelHealthCheck();
     this.emit("connected");
+  }
+
+  async _connectInner() {
+    const accessUrl = this.store.get("license.vpnAccessUrl");
+    if (!accessUrl) throw new Error("No VPN access key configured");
+
+    let config;
+    try {
+      config = this._parseAccessUrl(accessUrl);
+    } catch (e) {
+      throw new Error("Invalid VPN configuration");  // Don't include e.message (may contain credentials)
+    }
+
+    this._remoteHost = config.host;
+    this._remotePort = config.port;
+    this._password = config.password;
+    this._method = config.method;
+    this._cipherInfo = CIPHER_INFO[config.method];
+    this._masterKey = evpBytesToKey(config.password, this._cipherInfo.keyLen);
+
+    // Verify the VPN server is reachable before committing system proxy
+    await this._verifyTunnel();
+
+    // Start SOCKS5 proxy server
+    await this._startSocksProxy();
+
+    // Set system proxy to our local SOCKS5
+    await platform.setProxy(SOCKS_HOST, SOCKS_PORT);
+  }
+
+  // Single rollback — clears proxy, stops SOCKS, destroys sockets, clears credentials
+  async _rollback() {
+    try { await platform.clearProxy(); } catch {}
+    if (this._sockets) {
+      this._sockets.forEach(s => s.destroy());
+      this._sockets.clear();
+    }
+    if (this._server) {
+      await new Promise(resolve => this._server.close(resolve));
+      this._server = null;
+    }
+    this._stopTunnelHealthCheck();
+    this._remoteHost = null;
+    this._remotePort = null;
+    this._password = null;
+    this._masterKey = null;
+    this._cipherInfo = null;
+    this._method = null;
   }
 
   async disconnect() {
@@ -255,26 +285,56 @@ class VpnManager extends EventEmitter {
     this._connecting = false;
     if (!wasConnected && !wasConnecting) return;
 
-    // Clear system proxy
-    try {
-      await platform.clearProxy();
-    } catch (e) {
-      console.error("Failed to clear proxy:", e.message);
-    }
-
-    // Destroy all tracked client sockets before closing the server
-    if (this._sockets) {
-      this._sockets.forEach(s => s.destroy());
-      this._sockets.clear();
-    }
-
-    // Stop SOCKS5 server (with timeout to prevent hanging)
-    await Promise.race([
-      new Promise(resolve => { const s = this._server; this._server = null; if (s) s.close(resolve); else resolve(); }),
-      new Promise(resolve => setTimeout(resolve, 3000))
-    ]);
+    await this._rollback();
 
     if (wasConnected) this.emit("disconnected");
+  }
+
+  // Kill switch — detect dead tunnel and auto-disconnect to restore internet
+  _startTunnelHealthCheck() {
+    this._stopTunnelHealthCheck();
+    this._tunnelFailures = 0;
+
+    this._tunnelHealthInterval = setInterval(() => {
+      if (!this._connected) return;
+
+      // Probe: TCP connect to VPN server (lightweight, no AEAD)
+      const probe = net.createConnection(this._remotePort, this._remoteHost);
+      const timer = setTimeout(() => {
+        probe.destroy();
+        this._onTunnelProbeFailure();
+      }, 5000);
+
+      probe.on("connect", () => {
+        clearTimeout(timer);
+        probe.destroy();
+        this._tunnelFailures = 0; // reset on success
+      });
+
+      probe.on("error", () => {
+        clearTimeout(timer);
+        probe.destroy();
+        this._onTunnelProbeFailure();
+      });
+    }, 30000); // check every 30s
+  }
+
+  _stopTunnelHealthCheck() {
+    if (this._tunnelHealthInterval) {
+      clearInterval(this._tunnelHealthInterval);
+      this._tunnelHealthInterval = null;
+    }
+  }
+
+  _onTunnelProbeFailure() {
+    this._tunnelFailures++;
+    console.error(`Tunnel health check failed (${this._tunnelFailures}/3)`);
+    if (this._tunnelFailures >= 3) {
+      // 3 consecutive failures = tunnel is dead, kill switch
+      console.error("Tunnel dead — disconnecting to restore internet");
+      this.emit("error", new Error("VPN tunnel lost — disconnected to restore internet"));
+      this.disconnect().catch(() => {});
+    }
   }
 
   // SOCKS5 proxy that tunnels connections through Shadowsocks
@@ -286,9 +346,12 @@ class VpnManager extends EventEmitter {
 
       this._server.on("error", (err) => {
         console.error("SOCKS proxy error:", err.message);
-        this.emit("error", err);
-        this.disconnect().catch(() => {});
-        if (!this._connected) {
+        if (this._connected) {
+          // Post-connect error: emit and disconnect (kill switch)
+          this.emit("error", err);
+          this.disconnect().catch(() => {});
+        } else if (this._connecting) {
+          // During setup: reject the startup promise
           reject(err);
         }
       });
@@ -304,6 +367,7 @@ class VpnManager extends EventEmitter {
     // Track socket for clean shutdown
     this._sockets.add(client);
     client.on('close', () => this._sockets.delete(client));
+    client.on('error', () => client.destroy());
 
     // SOCKS5 handshake
     client.once("data", (data) => {
@@ -432,12 +496,68 @@ class VpnManager extends EventEmitter {
 
     remote.on("error", (err) => {
       console.error("Tunnel error:", err.message);
+      this._tunnelFailures++;
       client.end();
     });
 
     client.on("error", () => remote.end());
     client.on("close", () => remote.end());
     remote.on("close", () => client.end());
+  }
+
+  // Verify VPN server is reachable and Shadowsocks handshake succeeds before setting system proxy
+  _verifyTunnel() {
+    return new Promise((resolve, reject) => {
+      let dataTimeout = null;
+
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error("VPN server unreachable — connection timed out"));
+      }, 8000);
+
+      const sock = net.createConnection(this._remotePort, this._remoteHost);
+      this._sockets.add(sock);
+
+      const cleanup = () => {
+        this._sockets.delete(sock);
+        clearTimeout(timeout);
+        if (dataTimeout) clearTimeout(dataTimeout);
+        sock.destroy();
+      };
+
+      sock.on("connect", () => {
+        // TCP connect succeeded — now verify Shadowsocks handshake by sending
+        // a salt + encrypted request for a test target (1.1.1.1:80)
+        const info = this._cipherInfo;
+        const salt = crypto.randomBytes(info.saltLen);
+        const subkey = hkdfSha1(this._masterKey, salt, "ss-subkey", info.keyLen);
+        const nonce = Buffer.alloc(info.nonceLen);
+        const addrHeader = this._buildAddressHeader("1.1.1.1", 80);
+        const encrypted = aeadEncrypt(subkey, nonce, addrHeader, info.cipher, info.tagLen);
+        sock.write(Buffer.concat([salt, encrypted]));
+
+        // If server responds (even a few bytes), tunnel works
+        dataTimeout = setTimeout(() => {
+          cleanup();
+          reject(new Error("VPN server did not respond — check credentials or server status"));
+        }, 5000);
+
+        sock.once("data", () => {
+          cleanup();
+          resolve();
+        });
+      });
+
+      sock.on("error", (err) => {
+        cleanup();
+        const msg = err.code === "ECONNREFUSED"
+          ? "VPN server refused connection"
+          : err.code === "ETIMEDOUT"
+          ? "VPN server unreachable — connection timed out"
+          : `VPN server error: ${err.code || err.message}`;
+        reject(new Error(msg));
+      });
+    });
   }
 
   _buildAddressHeader(host, port) {

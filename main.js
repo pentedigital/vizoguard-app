@@ -259,9 +259,16 @@ ipcMain.handle("vpn:connect", async () => {
       return { success: false, error: validation.reason || "License invalid" };
     }
     await vpn.connect();
+    if (!vpn.isConnected) {
+      return { success: false, error: "Connection was cancelled" };
+    }
     return { success: true };
   } catch (err) {
-    return { success: false, error: err.message };
+    // Surface tunnel/connection errors to the UI (vpnConnect() return value is often ignored)
+    const safeMsg = (err.message || "VPN error").replace(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?/g, "[redacted]");
+    sendToRenderer("vpn:error", { message: safeMsg });
+    sendToRenderer("vpn:state", { connected: false });
+    return { success: false, error: safeMsg };
   }
 });
 

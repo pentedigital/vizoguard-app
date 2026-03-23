@@ -43,6 +43,10 @@ async function clearProxy() {
     "add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
     "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f",
   ]);
+  await execFileAsync("reg", [
+    "add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
+    "/v", "ProxyServer", "/t", "REG_SZ", "/d", "", "/f",
+  ]);
 
   try {
     await execFileAsync("netsh", ["winhttp", "reset", "proxy"]);

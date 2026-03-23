@@ -32,6 +32,19 @@
 - LRU cache: 10k entries, 1hr TTL
 - Risk levels: critical > high > medium > low
 
+## Architectural Rules
+- `vpn:connect` IPC validates license with server before every connection — cached state never trusted
+- VPN access URL cleared from electron-store on suspension/expiry and re-fetched on recovery
+- Tray and dashboard default to "Checking..." not "Protected" — state driven by validation, never defaults
+- `ss://` credential URL stripped from `license:status` IPC response — never exposed to renderer
+- License key masked in IPC (`VIZO-****-****-****-XXXX`) — full key never sent to renderer
+- System proxy cleared on startup, SIGTERM, SIGINT (crash recovery)
+- Proxy reapplied with explicit host:port after sleep/resume via powerMonitor
+- Disconnect sets `_connected=false` atomically before async ops (prevents concurrent race)
+- Single threat counter source: `securityProxy.threatsBlocked` (not threatChecker)
+- `window.vizoguard` access guarded with null check in all HTML pages
+- Windows proxy: WinInet (registry) + WinHTTP (netsh) — Firefox uses own settings (documented in UI toast)
+
 ## Security Rules
 - Context isolation enforced — all renderer communication via preload.js IPC bridge
 - IPC event listeners cleaned up on page load (`removeAllListeners` before `on`) to prevent accumulation
