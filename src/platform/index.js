@@ -6,8 +6,6 @@ if (process.platform === "win32") {
   // Stub for unsupported platforms (Linux dev/CI)
   module.exports = {
     getDeviceId: async () => { throw new Error(`Unsupported platform: ${process.platform}`); },
-    setProxy: async () => {},
-    clearProxy: async () => {},
     getConnections: async () => [],
   };
 }

@@ -12,6 +12,15 @@ files:
   - "ui/**/*"
   - "package.json"
 
+asarUnpack:
+  - "bin/**/*"
+
+extraFiles:
+  - from: "bin/darwin-${arch}"
+    to: "bin"
+    filter:
+      - "**/*"
+
 mac:
   category: public.app-category.utilities
   target:
@@ -29,6 +38,11 @@ win:
       arch:
         - x64
   icon: build/icon.png
+  extraFiles:
+    - from: "bin/win-amd64"
+      to: "bin"
+      filter:
+        - "**/*"
 
 nsis:
   oneClick: false

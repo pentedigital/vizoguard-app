@@ -1,7 +1,11 @@
 const net = require("net");
 const crypto = require("crypto");
 const { EventEmitter } = require("events");
-const platform = require("./platform");
+const Tunnel = require("./tunnel");
+const Routes = require("./routes");
+const Dns = require("./dns");
+const Monitor = require("./monitor");
+const { elevatedExec } = require("./elevation");
 
 // Shadowsocks AEAD client — local SOCKS5 proxy tunneling through Outline VPS
 // Implements chacha20-ietf-poly1305 and aes-256-gcm AEAD ciphers
@@ -177,8 +181,7 @@ class VpnManager extends EventEmitter {
     super();
     this.store = store;
     this._server = null;
-    this._connected = false;
-    this._connecting = false;
+    this._state = "disconnected"; // disconnected | connecting | connected | disconnecting | error
     this._licenseValid = true;
     this._remoteHost = null;
     this._remotePort = null;
@@ -189,10 +192,18 @@ class VpnManager extends EventEmitter {
     this._sockets = new Set();
     this._tunnelFailures = 0;
     this._tunnelHealthInterval = null;
+    this._tunnel = new Tunnel();
+    this._routes = new Routes();
+    this._dns = new Dns();
+    this._monitor = null;
   }
 
   get isConnected() {
-    return this._connected;
+    return this._state === "connected";
+  }
+
+  get state() {
+    return this._state;
   }
 
   getServerHost() {
@@ -227,8 +238,8 @@ class VpnManager extends EventEmitter {
 
   // Start local SOCKS5 proxy and set system proxy
   async connect() {
-    if (this._connected || this._connecting) return;
-    this._connecting = true;
+    if (this._state !== "disconnected" && this._state !== "error") return;
+    this._state = "connecting";
 
     // 15-second guard for entire connect flow
     let connectTimeoutId;
@@ -243,7 +254,7 @@ class VpnManager extends EventEmitter {
       throw e;
     } finally {
       clearTimeout(connectTimeoutId);
-      this._connecting = false;
+      if (this._state === "connecting") this._state = "disconnected";
     }
 
     // Check if license was invalidated during connect (#26)
@@ -258,9 +269,25 @@ class VpnManager extends EventEmitter {
       return;
     }
 
-    this._connected = true;  // Set AFTER license check passes
+    this._state = "connected";  // Set AFTER license check passes
     this._tunnelFailures = 0;
-    this._startTunnelHealthCheck();
+
+    // Start watchdog monitor
+    this._monitor = new Monitor(this._tunnel, this._routes, this._dns, Tunnel.TUN_GW);
+    this._monitor.on("emergency", (reason) => {
+      console.error("Watchdog emergency disconnect:", reason);
+      this.emit("error", new Error(reason));
+      this.disconnect().catch(() => {});
+    });
+    this._monitor.start();
+
+    // Listen for tun2socks process death
+    this._tunnel.on("died", (err) => {
+      console.error("tun2socks died:", err.message);
+      this.emit("error", new Error("VPN tunnel process died — disconnected to restore internet"));
+      this.disconnect().catch(() => {});
+    });
+
     this.emit("connected");
   }
 
@@ -283,19 +310,49 @@ class VpnManager extends EventEmitter {
     this._cipherInfo.cipher = resolveCipher(this._cipherInfo);
     this._masterKey = evpBytesToKey(config.password, this._cipherInfo.keyLen);
 
-    // Verify the VPN server is reachable before committing system proxy
-    await this._verifyTunnel();
+    // Step 1: Elevate privileges (fail early if user cancels)
+    await elevatedExec("echo vizoguard-vpn-auth");
 
-    // Start SOCKS5 proxy server
+    // Step 2: Start SOCKS5 proxy
     await this._startSocksProxy();
 
-    // Set system proxy to our local SOCKS5
-    await platform.setProxy(SOCKS_HOST, SOCKS_PORT);
+    // Step 3: Verify Shadowsocks tunnel works
+    await this._verifyTunnel();
+
+    // Step 4: Start tun2socks → creates TUN interface
+    await this._tunnel.start(SOCKS_PORT);
+
+    // Step 5: Save originals and switch routes to TUN (before DNS to prevent leaks)
+    await this._routes.save();
+    await this._dns.save();
+    await this._routes.apply(Tunnel.TUN_GW, this._remoteHost);
+
+    // Step 6: Set DNS (after routes — prevents DNS leak outside tunnel)
+    await this._dns.apply();
   }
 
-  // Single rollback — clears proxy, stops SOCKS, destroys sockets, clears credentials
+  // Single rollback — reverse of connect: DNS first, then routes, then kill tunnel, then stop SOCKS
+  // Routes restored BEFORE killing tun2socks (otherwise default route points to dead TUN)
   async _rollback() {
-    try { await platform.clearProxy(); } catch {}
+    // 1. Stop watchdog
+    if (this._monitor) {
+      this._monitor.stop();
+      this._monitor.removeAllListeners();
+      this._monitor = null;
+    }
+    this._stopTunnelHealthCheck();
+    this._tunnel.removeAllListeners();
+
+    // 2. Restore DNS (reverse of connect step 6)
+    try { await this._dns.restore(); } catch (e) { console.error("Rollback DNS:", e.message); }
+
+    // 3. Restore routes (reverse of connect step 5, BEFORE killing tun2socks)
+    try { await this._routes.restore(); } catch (e) { console.error("Rollback routes:", e.message); }
+
+    // 4. Kill tun2socks
+    this._tunnel.stop();
+
+    // 5. Destroy SOCKS sockets and server
     if (this._sockets) {
       this._sockets.forEach(s => s.destroy());
       this._sockets.clear();
@@ -308,7 +365,8 @@ class VpnManager extends EventEmitter {
         srv.close(() => { clearTimeout(t); resolve(); });
       });
     }
-    this._stopTunnelHealthCheck();
+
+    // 6. Clear credentials
     this._remoteHost = null;
     this._remotePort = null;
     this._password = null;
@@ -318,15 +376,14 @@ class VpnManager extends EventEmitter {
   }
 
   async disconnect() {
-    const wasConnected = this._connected;
-    const wasConnecting = this._connecting;
-    this._connected = false;
-    this._connecting = false;
-    if (!wasConnected && !wasConnecting) return;
+    const wasState = this._state;
+    if (wasState === "disconnected" || wasState === "disconnecting") return;
+    this._state = "disconnecting";
 
     await this._rollback();
+    this._state = "disconnected";
 
-    if (wasConnected) this.emit("disconnected");
+    if (wasState === "connected") this.emit("disconnected");
   }
 
   // Kill switch — detect dead tunnel and auto-disconnect to restore internet
@@ -335,7 +392,7 @@ class VpnManager extends EventEmitter {
     this._tunnelFailures = 0;
 
     this._tunnelHealthInterval = setInterval(() => {
-      if (!this._connected) return;
+      if (this._state !== "connected") return;
 
       // Probe: TCP connect to VPN server (lightweight, no AEAD)
       const probe = net.createConnection(this._remotePort, this._remoteHost);
@@ -385,11 +442,11 @@ class VpnManager extends EventEmitter {
 
       this._server.on("error", (err) => {
         console.error("SOCKS proxy error:", err.message);
-        if (this._connected) {
+        if (this._state === "connected") {
           // Post-connect error: emit and disconnect (kill switch)
           this.emit("error", err);
           this.disconnect().catch(() => {});
-        } else if (this._connecting) {
+        } else if (this._state === "connecting") {
           // During setup: reject the startup promise
           reject(err);
         }

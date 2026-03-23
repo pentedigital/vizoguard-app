@@ -17,43 +17,6 @@ function getDeviceId() {
   });
 }
 
-async function setProxy(host, port) {
-  // WinInet registry (covers Chrome, Edge, Electron, IE)
-  // Note: Firefox uses its own proxy settings and cannot be controlled from outside.
-  await execFileAsync("reg", [
-    "add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
-    "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "1", "/f",
-  ]);
-  await execFileAsync("reg", [
-    "add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
-    "/v", "ProxyServer", "/t", "REG_SZ", "/d", `socks=${host}:${port}`, "/f",
-  ]);
-
-  // WinHTTP proxy (covers .NET, PowerShell, many system apps)
-  try {
-    await execFileAsync("netsh", ["winhttp", "set", "proxy", `socks=${host}:${port}`]);
-  } catch (e) {
-    // netsh winhttp may require admin — non-fatal if it fails
-    console.warn("WinHTTP proxy set failed (may need admin):", e.message);
-  }
-}
-
-async function clearProxy() {
-  await execFileAsync("reg", [
-    "add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
-    "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f",
-  ]);
-  await execFileAsync("reg", [
-    "add", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
-    "/v", "ProxyServer", "/t", "REG_SZ", "/d", "", "/f",
-  ]);
-
-  try {
-    await execFileAsync("netsh", ["winhttp", "reset", "proxy"]);
-  } catch (e) {
-    console.warn("WinHTTP proxy reset failed:", e.message);
-  }
-}
 
 async function getConnections() {
   try {
@@ -68,4 +31,4 @@ async function getConnections() {
   }
 }
 
-module.exports = { getDeviceId, setProxy, clearProxy, getConnections };
+module.exports = { getDeviceId, getConnections };

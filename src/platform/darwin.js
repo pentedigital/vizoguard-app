@@ -13,30 +13,6 @@ function getDeviceId() {
   });
 }
 
-async function setProxy(host, port) {
-  // Get all network services
-  const { stdout } = await execFileAsync("/usr/sbin/networksetup", ["-listallnetworkservices"]);
-  const services = stdout.split("\n").filter((s) => s && !s.startsWith("*")).map((s) => s.trim());
-
-  for (const service of services) {
-    try {
-      await execFileAsync("/usr/sbin/networksetup", ["-setsocksfirewallproxy", service, host, String(port)]);
-      await execFileAsync("/usr/sbin/networksetup", ["-setsocksfirewallproxystate", service, "on"]);
-    } catch { /* some services don't support proxy */ }
-  }
-}
-
-async function clearProxy() {
-  const { stdout } = await execFileAsync("/usr/sbin/networksetup", ["-listallnetworkservices"]);
-  const services = stdout.split("\n").filter((s) => s && !s.startsWith("*")).map((s) => s.trim());
-
-  for (const service of services) {
-    try {
-      await execFileAsync("/usr/sbin/networksetup", ["-setsocksfirewallproxystate", service, "off"]);
-      await execFileAsync("/usr/sbin/networksetup", ["-setsocksfirewallproxy", service, "", "0"]);
-    } catch { /* ignore */ }
-  }
-}
 
 function getConnections() {
   return new Promise((resolve, reject) => {
@@ -52,4 +28,4 @@ function getConnections() {
   });
 }
 
-module.exports = { getDeviceId, setProxy, clearProxy, getConnections };
+module.exports = { getDeviceId, getConnections };

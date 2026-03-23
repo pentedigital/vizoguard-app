@@ -281,8 +281,18 @@ ipcMain.handle("vpn:disconnect", async () => {
   }
 });
 
+// Emergency restore — force-resets all network state (support recovery)
+ipcMain.handle("vpn:emergencyRestore", async () => {
+  try {
+    await vpn._rollback();
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle("vpn:status", () => {
-  return { connected: vpn.isConnected };
+  return { connected: vpn.isConnected, state: vpn.state };
 });
 
 ipcMain.handle("vpn:getKey", async () => {
@@ -556,11 +566,11 @@ license.onStatusChange((status) => {
 
 // ── Crash Safety ─────────────────────────────
 
-// Catch uncaught exceptions — clean up proxy and notify UI instead of crashing
+// Catch uncaught exceptions — clean up VPN state and notify UI instead of crashing
 process.on('uncaughtException', (err) => {
   console.error("Uncaught exception:", err);
-  // Clear proxy to prevent internet lockout
-  try { require("./src/platform").clearProxy(); } catch {}
+  // Restore routes/DNS to prevent internet lockout
+  try { vpn._rollback().catch(() => {}); } catch {}
   // Notify UI so it doesn't stay stuck on "Securing..."
   sendToRenderer("vpn:error", { message: err.message || "Unexpected error" });
   sendToRenderer("vpn:state", { connected: false });
@@ -573,20 +583,12 @@ process.on('unhandledRejection', (reason) => {
 // ── App Lifecycle ─────────────────────────────
 
 app.whenReady().then(async () => {
-  // Restore proxy on any exit (including force-kill via SIGTERM)
-  const platform = require("./src/platform");
-  process.on('SIGTERM', () => { try { platform.clearProxy(); } catch {} process.exit(0); });
-  process.on('SIGINT', () => { try { platform.clearProxy(); } catch {} process.exit(0); });
-  // Also clear proxy on app startup in case previous instance was killed
-  platform.clearProxy().catch(() => {});
+  // Crash recovery: restore routes/DNS in case previous session was killed
+  vpn._rollback().catch(() => {});
 
-  // Reapply proxy after sleep/resume
-  const { powerMonitor } = require("electron");
-  powerMonitor.on("resume", () => {
-    if (vpn && vpn.isConnected) {
-      platform.setProxy("127.0.0.1", 1080).catch(err => console.error("Failed to reapply proxy after resume:", err.message));
-    }
-  });
+  // Restore routes/DNS on any exit (including force-kill via SIGTERM)
+  process.on('SIGTERM', () => { vpn._rollback().catch(() => {}).finally(() => process.exit(0)); });
+  process.on('SIGINT', () => { vpn._rollback().catch(() => {}).finally(() => process.exit(0)); });
 
   if (process.platform === "darwin") {
     app.dock.hide();
