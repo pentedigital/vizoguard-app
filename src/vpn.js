@@ -249,9 +249,11 @@ class VpnManager extends EventEmitter {
   }
 
   async disconnect() {
-    if (!this._connected && !this._connecting) return;
     const wasConnected = this._connected;
+    const wasConnecting = this._connecting;
+    this._connected = false;
     this._connecting = false;
+    if (!wasConnected && !wasConnecting) return;
 
     // Clear system proxy
     try {
@@ -273,7 +275,6 @@ class VpnManager extends EventEmitter {
       await new Promise(resolve => srv.close(resolve));
     }
 
-    this._connected = false;
     if (wasConnected) this.emit("disconnected");
   }
 

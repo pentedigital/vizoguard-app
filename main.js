@@ -244,7 +244,10 @@ ipcMain.handle("license:activate", async (_event, key) => {
 });
 
 ipcMain.handle("license:status", () => {
-  return license.getCached();
+  const cached = license.getCached();
+  if (!cached) return null;
+  const { vpnAccessUrl, ...safe } = cached;
+  return safe;
 });
 
 ipcMain.handle("vpn:connect", async () => {
@@ -537,6 +540,21 @@ license.onStatusChange((status) => {
 // ── App Lifecycle ─────────────────────────────
 
 app.whenReady().then(async () => {
+  // Restore proxy on any exit (including force-kill via SIGTERM)
+  const platform = require("./src/platform");
+  process.on('SIGTERM', () => { try { platform.clearProxy(); } catch {} process.exit(0); });
+  process.on('SIGINT', () => { try { platform.clearProxy(); } catch {} process.exit(0); });
+  // Also clear proxy on app startup in case previous instance was killed
+  platform.clearProxy().catch(() => {});
+
+  // Reapply proxy after sleep/resume
+  const { powerMonitor } = require("electron");
+  powerMonitor.on("resume", () => {
+    if (vpn && vpn.isConnected) {
+      platform.setProxy().catch(err => console.error("Failed to reapply proxy after resume:", err.message));
+    }
+  });
+
   if (process.platform === "darwin") {
     app.dock.hide();
   }

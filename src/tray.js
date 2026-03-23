@@ -8,9 +8,9 @@ function createTray(callbacks) {
   const iconPath = path.join(__dirname, "..", "ui", "assets", iconName);
 
   tray = new Tray(nativeImage.createFromPath(iconPath));
-  tray.setToolTip("Vizoguard — Protected");
+  tray.setToolTip("Vizoguard — Checking...");
 
-  updateMenu(true, callbacks);
+  updateMenu(false, callbacks);
 
   tray.on("click", callbacks.showDashboard);
   tray.on("double-click", callbacks.showDashboard);

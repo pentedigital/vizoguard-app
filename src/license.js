@@ -97,8 +97,14 @@ class LicenseManager {
     try {
       const result = await apiCall("/license", { key, device_id: deviceId });
 
+      const previousStatus = this.store.get("license.status");
       this.store.set("license.status", result.status);
       this.store.set("license.expires", result.expires);
+
+      // Clear stale VPN URL on status recovery
+      if ((previousStatus === "suspended" || previousStatus === "expired") && result.status === "active") {
+        this.store.delete("license.vpnAccessUrl");
+      }
       this.store.set("license.lastSuccessfulCheck", new Date().toISOString());
 
       // Fetch VPN key if not cached
@@ -121,12 +127,14 @@ class LicenseManager {
       // Check HTTP status code (httpStatus) — not err.status which is the JSON body field
       if (err.httpStatus === 403 && err.status === "expired") {
         this.store.set("license.status", "expired");
+        this.store.delete("license.vpnAccessUrl");
         this._emit({ valid: false, reason: "expired" });
         return { valid: false, reason: "expired" };
       }
 
       if (err.httpStatus === 403 && err.status === "suspended") {
         this.store.set("license.status", "suspended");
+        this.store.delete("license.vpnAccessUrl");
         this._emit({ valid: false, reason: "suspended" });
         return { valid: false, reason: "suspended" };
       }
