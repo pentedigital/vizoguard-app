@@ -39,8 +39,9 @@ class ObfuscatedTransport extends EventEmitter {
     const arch = process.arch === "arm64" ? "arm64" : "amd64";
     const ext = process.platform === "win32" ? ".exe" : "";
 
+    // extraFiles places binaries at <install-dir>/bin/, not resources/bin/
     const base = app.isPackaged
-      ? path.join(process.resourcesPath, "bin")
+      ? path.join(path.dirname(app.getPath("exe")), "bin")
       : path.join(__dirname, "..", "..", "bin", `${platform}-${arch}`);
 
     return path.join(base, `sing-box${ext}`);

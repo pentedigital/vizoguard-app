@@ -34,8 +34,9 @@ class Tunnel extends EventEmitter {
     const ext = process.platform === "win32" ? ".exe" : "";
     const binName = `tun2socks${ext}`;
 
+    // extraFiles places binaries at <install-dir>/bin/, not resources/bin/
     const base = app.isPackaged
-      ? path.join(process.resourcesPath, "bin")
+      ? path.join(path.dirname(app.getPath("exe")), "bin")
       : path.join(__dirname, "..", "bin", `${platform}-${arch}`);
 
     return path.join(base, binName);
