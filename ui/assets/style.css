@@ -51,6 +51,19 @@ body {
   user-select: none;
 }
 
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.error-msg {
+  color: var(--red, #ff3b3b);
+  font-size: 0.8rem;
+  min-height: 1.2em;
+  margin: 8px 0;
+  text-align: center;
+}
+
 ::selection { background: var(--teal); color: var(--void); }
 
 a { color: var(--teal); text-decoration: none; }
