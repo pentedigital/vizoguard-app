@@ -139,6 +139,11 @@ class LicenseManager {
         return { valid: false, reason: "suspended" };
       }
 
+      if (err.httpStatus === 403 && err.status === "device_mismatch") {
+        this._emit({ valid: false, reason: "device_mismatch" });
+        return { valid: false, reason: "device_mismatch", transferable: true };
+      }
+
       // Any other 403 — treat as invalid (don't fall through to grace period)
       if (err.httpStatus === 403) {
         this.store.set("license.status", "invalid");
@@ -156,6 +161,21 @@ class LicenseManager {
       this._emit({ valid: false, reason: "grace_expired" });
       return { valid: false, reason: "grace_expired" };
     }
+  }
+
+  // Transfer license to this device (called when user confirms device transfer)
+  async transferToThisDevice() {
+    const key = this.store.get("license.key");
+    const deviceId = await platform.getDeviceId();
+
+    const result = await apiCall("/license/transfer", { key, device_id: deviceId });
+    if (result.success) {
+      // Update stored device ID and clear stale VPN key
+      this.store.set("license.deviceId", deviceId);
+      this.store.delete("license.vpnAccessUrl");
+      console.log("License transferred to this device");
+    }
+    return result;
   }
 
   startPeriodicCheck() {

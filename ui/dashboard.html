@@ -453,8 +453,28 @@
   });
 
   window.vizoguard.onVpnError(function(data) {
-    showToast('VPN error: ' + data.message, true);
-    setVpnState('error');
+    if (data.code === 'device_mismatch') {
+      // Show transfer prompt instead of generic error
+      var msg = 'This license is active on another device. Move it here?';
+      showToast(msg, true);
+      setVpnState('error');
+      // Auto-show a confirm dialog
+      setTimeout(function() {
+        if (confirm('This license is already activated on another device.\n\nDo you want to transfer it to this device?')) {
+          window.vizoguard.transferLicense().then(function(result) {
+            if (result && result.success) {
+              showToast('License transferred! Tap Connect again.');
+              setVpnState('idle');
+            } else {
+              showToast('Transfer failed: ' + (result.error || 'Unknown error'), true);
+            }
+          });
+        }
+      }, 300);
+    } else {
+      showToast('VPN error: ' + data.message, true);
+      setVpnState('error');
+    }
   });
 
   window.vizoguard.onThreatBlocked(function(data) {

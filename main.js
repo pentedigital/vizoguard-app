@@ -251,12 +251,32 @@ ipcMain.handle("license:status", () => {
   return safe;
 });
 
+ipcMain.handle("license:transfer", async () => {
+  try {
+    const result = await license.transferToThisDevice();
+    return result;
+  } catch (err) {
+    return { success: false, error: err.error || err.message || "Transfer failed" };
+  }
+});
+
 ipcMain.handle("vpn:connect", async () => {
   try {
     // Validate license with server before connecting
     const validation = await license.validate();
     if (!validation.valid) {
-      return { success: false, error: validation.reason || "License invalid" };
+      const errorMessages = {
+        device_mismatch: "This license is already activated on another device",
+        expired: "Your license has expired",
+        suspended: "Your license has been suspended",
+        grace_expired: "License could not be verified — please connect to the internet",
+        no_license: "No license key found — please activate first",
+        invalid: "License key is invalid",
+      };
+      const msg = errorMessages[validation.reason] || "License validation failed";
+      sendToRenderer("vpn:error", { message: msg, code: validation.reason });
+      sendToRenderer("vpn:state", { connected: false });
+      return { success: false, error: msg, code: validation.reason };
     }
     await vpn.connect();
     if (!vpn.isConnected) {

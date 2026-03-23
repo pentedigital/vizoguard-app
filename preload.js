@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("vizoguard", {
   // License
   activateLicense: (key) => ipcRenderer.invoke("license:activate", key),
   getLicenseStatus: () => ipcRenderer.invoke("license:status"),
+  transferLicense: () => ipcRenderer.invoke("license:transfer"),
 
   // VPN
   vpnConnect: () => ipcRenderer.invoke("vpn:connect"),
