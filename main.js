@@ -559,7 +559,7 @@ app.whenReady().then(async () => {
   const { powerMonitor } = require("electron");
   powerMonitor.on("resume", () => {
     if (vpn && vpn.isConnected) {
-      platform.setProxy().catch(err => console.error("Failed to reapply proxy after resume:", err.message));
+      platform.setProxy("127.0.0.1", 1080).catch(err => console.error("Failed to reapply proxy after resume:", err.message));
     }
   });
 

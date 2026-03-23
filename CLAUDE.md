@@ -81,7 +81,7 @@
 - `vpn._licenseValid` is set by `main.js` license status handler — connect() checks it after completing to auto-disconnect if license expired during setup
 - `startSecurityEngine()` is guarded by `_engineStarted` flag — reset to `false` when license becomes invalid so engine can restart on revalidation
 - `new Store()` is wrapped in try/catch — corrupted JSON auto-resets the store file
-- `autoUpdater.autoDownload = false` — user controls update downloads to prevent partial/corrupted installs
+- `autoUpdater.autoDownload = true` — updates download automatically when available; `autoInstallOnAppQuit = true` installs on next quit
 - AeadDecryptor: BOTH catch blocks (length + payload) must set `_failed = true` — missing it causes corrupted state processing
 - `SecurityProxy.stop()` destroys all tracked sockets (`_sockets` Set) before `server.close()` — prevents EADDRINUSE on restart
 - `_handleConnect` uses regex for host:port parsing — supports IPv6 `[addr]:port` format, not simple `split(":")`
