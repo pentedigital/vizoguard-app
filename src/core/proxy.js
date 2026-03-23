@@ -136,7 +136,6 @@ class SecurityProxy extends EventEmitter {
 
     if (result.risk === "critical" || result.risk === "high") {
       this.threatsBlocked++;
-      this.threatChecker.threatsBlocked++; // Sync with engine panel counter
       this.emit("blocked", { url: `https://${hostname}`, ...result });
       clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
       clientSocket.end();

@@ -268,12 +268,11 @@ class VpnManager extends EventEmitter {
       this._sockets.clear();
     }
 
-    // Stop SOCKS5 server
-    if (this._server) {
-      const srv = this._server;
-      this._server = null;
-      await new Promise(resolve => srv.close(resolve));
-    }
+    // Stop SOCKS5 server (with timeout to prevent hanging)
+    await Promise.race([
+      new Promise(resolve => { const s = this._server; this._server = null; if (s) s.close(resolve); else resolve(); }),
+      new Promise(resolve => setTimeout(resolve, 3000))
+    ]);
 
     if (wasConnected) this.emit("disconnected");
   }

@@ -246,12 +246,18 @@ ipcMain.handle("license:activate", async (_event, key) => {
 ipcMain.handle("license:status", () => {
   const cached = license.getCached();
   if (!cached) return null;
-  const { vpnAccessUrl, ...safe } = cached;
+  const { vpnAccessUrl, key, ...safe } = cached;
+  safe.key = key ? key.slice(0, 5) + "****-****-****-" + key.slice(-4) : null;
   return safe;
 });
 
 ipcMain.handle("vpn:connect", async () => {
   try {
+    // Validate license with server before connecting
+    const validation = await license.validate();
+    if (!validation.valid) {
+      return { success: false, error: validation.reason || "License invalid" };
+    }
     await vpn.connect();
     return { success: true };
   } catch (err) {
@@ -379,7 +385,7 @@ function getEngineMetrics() {
   try {
     if (typeof threatChecker !== 'undefined' && threatChecker) {
       stats.proxy.cachedEntries = threatChecker._cache?.size || 0;
-      stats.proxy.threatsBlocked = threatChecker.threatsBlocked || 0;
+      stats.proxy.threatsBlocked = securityProxy ? securityProxy.threatsBlocked : 0;
       stats.immune.layers[0].level = threatChecker._cache?.size > 0 ? 98 : 0;
     }
     if (typeof connectionMonitor !== 'undefined' && connectionMonitor) {
@@ -402,6 +408,7 @@ function getEngineMetrics() {
       stats.vpn.ipMasked = vpn?.isConnected || false;
       stats.vpn.dnsEncrypted = vpn?.isConnected || false;
       stats.vpn.serverHost = vpn.getServerHost?.() || '—';
+      stats.vpn.uptime = vpn && vpn.isConnected && _vpnConnectTime ? Math.floor((Date.now() - _vpnConnectTime) / 1000) : 0;
     }
     stats.immune.layers[2].level = 0; // Persistence — not yet implemented
     stats.immune.layers[3].level = 0; // Sentinel — not yet implemented
@@ -424,6 +431,7 @@ function flattenEngineMetrics() {
     threatsBlocked: stats.proxy.threatsBlocked,
     activeConnections: stats.proxy.activeConnections,
     threatDbLoaded: stats.proxy.threatDbLoaded,
+    uptime: stats.vpn.uptime || 0,
     layers: stats.immune.layers.map(l => l.level)
   };
 }
