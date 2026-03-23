@@ -312,8 +312,14 @@ class VpnManager extends EventEmitter {
     // Step 1: Start SOCKS5 proxy
     await this._startSocksProxy();
 
-    // Step 2: Verify Shadowsocks tunnel works
-    await this._verifyTunnel();
+    // Step 2: Verify Shadowsocks tunnel (non-fatal — some ISPs block direct probes
+    // but traffic still works through tun2socks)
+    try {
+      await this._verifyTunnel();
+    } catch (verifyErr) {
+      console.warn("Tunnel verification failed (proceeding anyway):", verifyErr.message);
+      this.emit("warning", verifyErr.message);
+    }
 
     // Step 3: Start tun2socks (elevated — prompts for admin)
     await this._tunnel.start(SOCKS_PORT);
