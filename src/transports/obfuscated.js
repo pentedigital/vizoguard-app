@@ -61,7 +61,7 @@ class ObfuscatedTransport extends EventEmitter {
       inbounds: [{
         type: "tun",
         interface_name: "vizoguard",
-        inet4_address: "10.0.85.1/30",
+        address: ["10.0.85.1/30"],
         auto_route: true,
         strict_route: true,
         sniff: true,
@@ -92,7 +92,8 @@ class ObfuscatedTransport extends EventEmitter {
         ]
       },
       route: {
-        auto_detect_interface: true
+        auto_detect_interface: true,
+        final: "proxy"
       }
     };
   }
@@ -175,6 +176,7 @@ class ObfuscatedTransport extends EventEmitter {
 
   async stop() {
     this._stopHealth();
+    const wasRunning = this._running;
 
     if (this._pid) {
       const pid = this._pid;
@@ -196,7 +198,7 @@ class ObfuscatedTransport extends EventEmitter {
     try { fs.unlinkSync(this._getPidFile()); } catch {}
 
     this._running = false;
-    this.emit("disconnected");
+    if (wasRunning) this.emit("disconnected");
   }
 
   // Quick test: can we reach vizoguard.com:443 via TLS+WS?
@@ -223,8 +225,9 @@ class ObfuscatedTransport extends EventEmitter {
   async _detectTun() {
     try {
       if (process.platform === "darwin") {
-        const { stdout } = await execFileAsync("ifconfig", ["-l"]);
-        return stdout.includes("utun");
+        // macOS: sing-box creates utunN (can't guarantee name "vizoguard")
+        // If process is alive, TUN is ready (sing-box exits on TUN creation failure)
+        return this._pid && this._isAlive();
       } else {
         const { stdout } = await execFileAsync("netsh", ["interface", "show", "interface"]);
         return stdout.includes("vizoguard");

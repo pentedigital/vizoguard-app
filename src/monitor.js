@@ -17,6 +17,7 @@ class Monitor extends EventEmitter {
     this._running = false;
     this._consecutiveFailures = 0;
     this._savedGateway = routes.originalGateway;
+    this._checking = false;
   }
 
   start() {
@@ -38,7 +39,12 @@ class Monitor extends EventEmitter {
   }
 
   async _check() {
-    if (!this._running) return;
+    if (!this._running || this._checking) return;
+    this._checking = true;
+    try { await this._doCheck(); } finally { this._checking = false; }
+  }
+
+  async _doCheck() {
 
     // 1. Check tun2socks process
     if (!this._tunnel.isAlive()) {

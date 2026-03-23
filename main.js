@@ -308,7 +308,8 @@ ipcMain.handle("vpn:disconnect", async () => {
 ipcMain.handle("vpn:emergencyRestore", async () => {
   try {
     await connectionManager.emergencyStop();
-    await vpn._rollback();
+    // vpn._rollback() is called by direct.stop() → vpn.disconnect() internally
+    // Only call it directly if connectionManager wasn't using direct mode
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
@@ -638,7 +639,7 @@ app.whenReady().then(async () => {
 
       // Auto-connect if setting is enabled
       if (store.get('autoConnect')) {
-        vpn.connect().catch(() => {});
+        connectionManager.connect().catch(() => {});
       }
 
       // Check for updates silently

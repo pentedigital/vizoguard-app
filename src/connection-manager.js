@@ -13,6 +13,7 @@ class ConnectionManager extends EventEmitter {
     this._store = store;
     this._active = null; // currently active transport
     this._connecting = false;
+    this._aborted = false;
   }
 
   get isConnected() {
@@ -27,6 +28,7 @@ class ConnectionManager extends EventEmitter {
   async connect() {
     if (this._connecting || this.isConnected) return;
     this._connecting = true;
+    this._aborted = false;
 
     try {
       const mode = this._store.get("connectionMode", "auto");
@@ -57,9 +59,11 @@ class ConnectionManager extends EventEmitter {
       }
 
       // Try direct first (5s TCP probe)
+      if (this._aborted) return;
       console.log("Auto mode: testing direct connection...");
       const directOk = await this._direct.test(5000);
 
+      if (this._aborted) return;
       if (directOk) {
         console.log("Direct connection available — using direct mode");
         try {
@@ -71,6 +75,7 @@ class ConnectionManager extends EventEmitter {
         }
       }
 
+      if (this._aborted) return;
       // Fallback to obfuscated
       console.log("Direct blocked — switching to obfuscated mode (VLESS+WS+TLS)");
       try {
@@ -86,6 +91,7 @@ class ConnectionManager extends EventEmitter {
   }
 
   async disconnect() {
+    this._aborted = true; // cancel any in-progress connect
     if (this._active) {
       const transport = this._active;
       this._active = null;
