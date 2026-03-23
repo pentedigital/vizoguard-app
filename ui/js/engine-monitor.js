@@ -160,24 +160,14 @@ function _handleEngineUpdate(data) {
 /* ── _applyStats(data) ───────────────────────────────────────── */
 
 function _applyStats(data) {
-  // -- Connection section
-  // encryption / cipher
+  // -- Encryption / cipher (VPN Tunnel node)
   if (data.cipher !== undefined) {
-    _setText('eng-cipher', data.cipher);         // spec name
-    _setText('eng-encryption', data.cipher);     // actual HTML id
+    _setText('eng-encryption', data.cipher);
   } else if (data.encryption !== undefined) {
-    _setText('eng-cipher', data.encryption);
     _setText('eng-encryption', data.encryption);
   }
 
-  // server
-  if (data.serverHost !== undefined) {
-    _setText('eng-server', data.serverHost);
-  } else if (data.server !== undefined) {
-    _setText('eng-server', data.server);
-  }
-
-  // uptime (seconds → HH:MM:SS)
+  // -- Uptime (stats row)
   if (data.uptime !== undefined) {
     var uptimeStr = _formatUptime(Math.floor(data.uptime));
     _setText('eng-uptime', uptimeStr);
@@ -185,14 +175,13 @@ function _applyStats(data) {
     _setText('eng-uptime', _formatUptime(Math.floor(data.uptimeSeconds)));
   }
 
-  // IP masked
+  // -- IP masked (stats row)
   if (data.ipMasked !== undefined) {
     var ipText = data.ipMasked ? '\u2713 Masked' : '\u2717 Exposed';
-    _setText('eng-ip', ipText);           // spec name
-    _setText('eng-ip-masked', ipText);    // actual HTML id
+    _setText('eng-ip-masked', ipText);
   }
 
-  // DNS
+  // -- DNS (stats row)
   if (data.dns !== undefined) {
     var dnsText = data.dns === 'encrypted' || data.dnsEncrypted ? 'Encrypted' : 'Standard';
     _setText('eng-dns', dnsText);
@@ -200,16 +189,13 @@ function _applyStats(data) {
     _setText('eng-dns', data.dnsEncrypted ? 'Encrypted' : 'Standard');
   }
 
-  // -- Security Engine section
-  // requests per second
+  // -- Requests per second (Monitor node)
   var rps = data.rps !== undefined ? data.rps : data.requestsPerSec;
   if (rps !== undefined) {
-    var rpsText = rps + ' req/s';
-    _setText('eng-rps', rpsText);
-    _setText('eng-proxy-rps', rpsText);
+    _setText('eng-proxy-rps', rps + ' req/s');
   }
 
-  // cache entries
+  // -- Cache entries (Threat DB node)
   if (data.cachedEntries !== undefined) {
     _setText('eng-cache', data.cachedEntries + ' entries');
   } else if (data.cacheEntries !== undefined) {
@@ -218,51 +204,18 @@ function _applyStats(data) {
     _setText('eng-cache', data.cache + ' entries');
   }
 
-  // threats blocked
+  // -- Threats blocked (Firewall node)
   if (data.threatsBlocked !== undefined) {
     _setText('eng-threats', data.threatsBlocked + ' blocked');
   } else if (data.threats !== undefined) {
     _setText('eng-threats', data.threats + ' blocked');
   }
 
-  // active connections
+  // -- Active connections (Scanner node)
   if (data.activeConnections !== undefined) {
-    _setText('eng-conns', data.activeConnections + ' active');       // spec name
-    _setText('eng-connections', data.activeConnections + ' active'); // actual HTML id
+    _setText('eng-connections', data.activeConnections + ' active');
   } else if (data.connections !== undefined) {
-    _setText('eng-conns', data.connections + ' active');
     _setText('eng-connections', data.connections + ' active');
-  }
-
-  // Threat DB progress bar
-  // spec: #eng-db-bar  actual HTML: #eng-threatdb-fill + #eng-threatdb-pct
-  if (data.threatDbLoaded !== undefined) {
-    var dbPct = data.threatDbLoaded ? 100 : 0;
-    _setWidth('eng-db-bar', dbPct);           // spec name
-    _setWidth('eng-threatdb-fill', dbPct);    // actual HTML id
-    _setText('eng-threatdb-pct', dbPct + '%');
-  } else if (data.threatDbPct !== undefined) {
-    _setWidth('eng-db-bar', data.threatDbPct);
-    _setWidth('eng-threatdb-fill', data.threatDbPct);
-    _setText('eng-threatdb-pct', data.threatDbPct + '%');
-  }
-
-  // -- Immune System section
-  // Layers 1–4: spec uses #immune-l1 .. #immune-l4 (fill bars)
-  //             actual HTML uses #immune-l1-fill .. #immune-l4-fill
-  var layers = data.layers || data.immuneLayers;
-  if (layers) {
-    for (var i = 1; i <= 4; i++) {
-      var level = layers['l' + i] !== undefined ? layers['l' + i]
-                : layers[i - 1]  !== undefined ? layers[i - 1]
-                : null;
-      if (level !== null) {
-        var pct = Math.min(100, Math.max(0, Math.round(level)));
-        _setWidth('immune-l' + i, pct);          // spec name
-        _setWidth('immune-l' + i + '-fill', pct); // actual HTML id
-        _setText('immune-l' + i + '-pct', pct + '%');
-      }
-    }
   }
 }
 

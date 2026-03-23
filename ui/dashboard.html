@@ -74,106 +74,85 @@
     <span class="engine-chevron" id="engine-chevron">&#x25BE;</span>
   </div>
   <div class="engine-body" id="engine-body">
+    <div class="engine-graph">
+      <svg class="engine-svg" viewBox="0 0 400 280" xmlns="http://www.w3.org/2000/svg">
+        <!-- Animated connection lines (data flow) -->
+        <line class="flow-line" x1="200" y1="40" x2="80" y2="120"/>
+        <line class="flow-line" x1="200" y1="40" x2="320" y2="120"/>
+        <line class="flow-line" x1="80" y1="120" x2="80" y2="220"/>
+        <line class="flow-line" x1="320" y1="120" x2="320" y2="220"/>
+        <line class="flow-line" x1="80" y1="220" x2="200" y2="260"/>
+        <line class="flow-line" x1="320" y1="220" x2="200" y2="260"/>
+        <line class="flow-line" x1="80" y1="120" x2="320" y2="120"/>
 
-    <!-- CONNECTION section -->
-    <div class="engine-section">
-      <div class="engine-section-label">Connection</div>
-      <div class="engine-row">
-        <span class="engine-icon">[E]</span>
-        <span class="engine-label">Encryption</span>
-        <span class="engine-value" id="eng-encryption">&#x2014;</span>
+        <!-- Animated dots flowing along lines -->
+        <circle class="flow-dot" r="3">
+          <animateMotion dur="2s" repeatCount="indefinite" path="M200,40 L80,120"/>
+        </circle>
+        <circle class="flow-dot" r="3">
+          <animateMotion dur="2.5s" repeatCount="indefinite" path="M200,40 L320,120"/>
+        </circle>
+        <circle class="flow-dot" r="3">
+          <animateMotion dur="3s" repeatCount="indefinite" path="M80,120 L80,220"/>
+        </circle>
+        <circle class="flow-dot" r="3">
+          <animateMotion dur="2.8s" repeatCount="indefinite" path="M320,120 L320,220"/>
+        </circle>
+      </svg>
+
+      <!-- Nodes positioned absolutely over the SVG -->
+      <div class="engine-node node-vpn" style="top:15px; left:50%; transform:translateX(-50%);">
+        <div class="node-icon">&#x1F512;</div>
+        <div class="node-label">VPN Tunnel</div>
+        <div class="node-value" id="eng-encryption">&#x2014;</div>
       </div>
-      <div class="engine-row">
-        <span class="engine-icon">[S]</span>
-        <span class="engine-label">Server</span>
-        <span class="engine-value" id="eng-server">&#x2014;</span>
+
+      <div class="engine-node node-firewall" style="top:95px; left:10%;">
+        <div class="node-icon">&#x1F6E1;</div>
+        <div class="node-label">Firewall</div>
+        <div class="node-value" id="eng-threats">0 blocked</div>
       </div>
-      <div class="engine-row">
-        <span class="engine-icon">[T]</span>
-        <span class="engine-label">Uptime</span>
-        <span class="engine-value" id="eng-uptime">&#x2014;</span>
+
+      <div class="engine-node node-scanner" style="top:95px; right:10%;">
+        <div class="node-icon">&#x1F50D;</div>
+        <div class="node-label">Scanner</div>
+        <div class="node-value" id="eng-connections">0 active</div>
       </div>
-      <div class="engine-row">
-        <span class="engine-icon">[M]</span>
-        <span class="engine-label">IP Masked</span>
-        <span class="engine-value" id="eng-ip-masked">No</span>
+
+      <div class="engine-node node-monitor" style="top:190px; left:10%;">
+        <div class="node-icon">&#x1F4CA;</div>
+        <div class="node-label">Monitor</div>
+        <div class="node-value" id="eng-proxy-rps">0 req/s</div>
       </div>
-      <div class="engine-row">
-        <span class="engine-icon">[N]</span>
-        <span class="engine-label">DNS</span>
-        <span class="engine-value" id="eng-dns">System</span>
+
+      <div class="engine-node node-database" style="top:190px; right:10%;">
+        <div class="node-icon">&#x1F4BE;</div>
+        <div class="node-label">Threat DB</div>
+        <div class="node-value" id="eng-cache">0</div>
+      </div>
+
+      <div class="engine-node node-shield" style="bottom:5px; left:50%; transform:translateX(-50%);">
+        <div class="node-icon">&#x2705;</div>
+        <div class="node-label">Status</div>
+        <div class="node-value" id="wh-text">All systems nominal</div>
       </div>
     </div>
 
-    <!-- SECURITY ENGINE section -->
-    <div class="engine-section">
-      <div class="engine-section-label">Security Engine</div>
-      <div class="engine-row">
-        <span class="engine-label">Proxy req/s</span>
-        <span class="engine-value" id="eng-proxy-rps">0</span>
+    <!-- Compact stats row below the graph -->
+    <div class="engine-stats-row">
+      <div class="engine-stat">
+        <span class="stat-label">IP Masked</span>
+        <span class="stat-value" id="eng-ip-masked">No</span>
       </div>
-      <div class="engine-row">
-        <span class="engine-label">Cache entries</span>
-        <span class="engine-value" id="eng-cache">0</span>
+      <div class="engine-stat">
+        <span class="stat-label">DNS</span>
+        <span class="stat-value" id="eng-dns">System</span>
       </div>
-      <div class="engine-row">
-        <span class="engine-label">Threats blocked</span>
-        <span class="engine-value" id="eng-threats">0</span>
-      </div>
-      <div class="engine-row">
-        <span class="engine-label">Connections active</span>
-        <span class="engine-value" id="eng-connections">0</span>
-      </div>
-      <div class="engine-row" style="flex-direction:column; align-items:flex-start; gap:4px;">
-        <span class="engine-label">Threat DB</span>
-        <div style="display:flex; align-items:center; width:100%; gap:8px;">
-          <div class="progress-bar">
-            <div class="progress-fill" id="eng-threatdb-fill" style="width:0%"></div>
-          </div>
-          <span class="engine-pct" id="eng-threatdb-pct">0%</span>
-        </div>
+      <div class="engine-stat">
+        <span class="stat-label">Uptime</span>
+        <span class="stat-value" id="eng-uptime">&#x2014;</span>
       </div>
     </div>
-
-    <!-- IMMUNE SYSTEM section -->
-    <div class="engine-section">
-      <div class="engine-section-label">Immune System</div>
-      <div class="engine-row">
-        <span class="engine-label">L1 Blocklist</span>
-        <div class="progress-bar">
-          <div class="progress-fill" id="immune-l1-fill" style="width:0%"></div>
-        </div>
-        <span class="engine-pct" id="immune-l1-pct">0%</span>
-      </div>
-      <div class="engine-row">
-        <span class="engine-label">L2 Behaviors</span>
-        <div class="progress-bar">
-          <div class="progress-fill" id="immune-l2-fill" style="width:0%"></div>
-        </div>
-        <span class="engine-pct" id="immune-l2-pct">0%</span>
-      </div>
-      <div class="engine-row">
-        <span class="engine-label">L3 Persistence</span>
-        <div class="progress-bar">
-          <div class="progress-fill" id="immune-l3-fill" style="width:0%"></div>
-        </div>
-        <span class="engine-pct" id="immune-l3-pct">0%</span>
-      </div>
-      <div class="engine-row">
-        <span class="engine-label">L4 Sentinel</span>
-        <div class="progress-bar">
-          <div class="progress-fill" id="immune-l4-fill" style="width:0%"></div>
-        </div>
-        <span class="engine-pct" id="immune-l4-pct">0%</span>
-      </div>
-    </div>
-
-    <!-- WHAT JUST HAPPENED section -->
-    <div class="what-happened" id="what-happened">
-      <span class="wh-icon">&#x1F6E1;</span>
-      <span class="wh-text" id="wh-text">All systems nominal.</span>
-    </div>
-
   </div>
 </div>
 
