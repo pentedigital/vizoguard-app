@@ -5,7 +5,6 @@ const Tunnel = require("./tunnel");
 const Routes = require("./routes");
 const Dns = require("./dns");
 const Monitor = require("./monitor");
-const { elevatedExec } = require("./elevation");
 
 // Shadowsocks AEAD client — local SOCKS5 proxy tunneling through Outline VPS
 // Implements chacha20-ietf-poly1305 and aes-256-gcm AEAD ciphers
@@ -310,16 +309,13 @@ class VpnManager extends EventEmitter {
     this._cipherInfo.cipher = resolveCipher(this._cipherInfo);
     this._masterKey = evpBytesToKey(config.password, this._cipherInfo.keyLen);
 
-    // Step 1: Elevate privileges (fail early if user cancels)
-    await elevatedExec("echo vizoguard-vpn-auth");
-
-    // Step 2: Start SOCKS5 proxy
+    // Step 1: Start SOCKS5 proxy
     await this._startSocksProxy();
 
-    // Step 3: Verify Shadowsocks tunnel works
+    // Step 2: Verify Shadowsocks tunnel works
     await this._verifyTunnel();
 
-    // Step 4: Start tun2socks → creates TUN interface
+    // Step 3: Start tun2socks (elevated — prompts for admin)
     await this._tunnel.start(SOCKS_PORT);
 
     // Step 5: Save originals and switch routes to TUN (before DNS to prevent leaks)
