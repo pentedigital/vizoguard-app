@@ -270,11 +270,10 @@ function stopTimer() {
       if (state === 'connecting' || state === 'reconnecting') return;
 
       if (state === 'connected') {
-        // Disconnect
         if (window.vizoguard && typeof window.vizoguard.vpnDisconnect === 'function') {
           window.vizoguard.vpnDisconnect();
         }
-        setVpnState('idle');
+        // Don't set idle here — wait for vpn:state event from main process
         return;
       }
 

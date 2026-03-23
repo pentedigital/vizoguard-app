@@ -343,7 +343,7 @@ a:hover { opacity: 0.8; }
 }
 
 .engine-view.expanded .engine-body {
-  max-height: 600px;
+  max-height: 320px;
   opacity: 1;
   overflow-y: auto;
 }
@@ -779,7 +779,7 @@ a:hover { opacity: 0.8; }
 .activate-card,
 .expired-card {
   max-width: 360px;
-  margin: 100px auto 0;
+  margin: 40px auto 0;
   padding: 40px 30px;
   text-align: center;
 }

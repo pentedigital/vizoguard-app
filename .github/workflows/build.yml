@@ -124,7 +124,7 @@ jobs:
 
       - name: Upload installers to VPS
         run: |
-          VERSION=$(node -p "require('./package.json').version")
+          VERSION=$(grep '^version:' dist/latest.yml | awk '{print $2}')
           echo "Deploying version: $VERSION"
 
           # Upload Mac DMGs (x64 + arm64 separately)

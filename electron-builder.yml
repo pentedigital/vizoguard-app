@@ -29,6 +29,8 @@ win:
       arch:
         - x64
   icon: build/icon.png
+  signingHashAlgorithms: [sha256]
+  rfc3161TimeStampServer: http://timestamp.digicert.com
 
 nsis:
   oneClick: false
