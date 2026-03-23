@@ -4,6 +4,9 @@ const fs = require("fs");
 const Store = require("electron-store");
 const LicenseManager = require("./src/license");
 const VpnManager = require("./src/vpn");
+const DirectTransport = require("./src/transports/direct");
+const ObfuscatedTransport = require("./src/transports/obfuscated");
+const ConnectionManager = require("./src/connection-manager");
 const { ThreatChecker, ConnectionMonitor, SecurityProxy, ImmuneSystem } = require("./src/core");
 const { createTray, updateMenu, destroyTray } = require("./src/tray");
 const Updater = require("./src/updater");
@@ -36,6 +39,9 @@ const connectionMonitor = new ConnectionMonitor();
 const securityProxy = new SecurityProxy(threatChecker);
 const immuneSystem = new ImmuneSystem(app.isPackaged ? path.dirname(app.getPath("exe")) : __dirname);
 const vpn = new VpnManager(store);
+const directTransport = new DirectTransport(vpn);
+const obfuscatedTransport = new ObfuscatedTransport();
+const connectionManager = new ConnectionManager(directTransport, obfuscatedTransport, store);
 const updater = new Updater();
 
 let mainWindow = null;
@@ -176,24 +182,22 @@ immuneSystem.on("alert", (data) => {
 
 let _vpnConnectTime = null;
 
-vpn.on("connected", () => {
+connectionManager.on("connected", (info) => {
   _vpnConnectTime = Date.now();
-  const serverHost = vpn.getServerHost ? vpn.getServerHost() : undefined;
-  logConnection('connected', serverHost ? { server: serverHost } : {});
+  const mode = info && info.mode || "unknown";
+  logConnection('connected', { mode });
   updateWeeklyStats('connection');
-  // Start 60-second ticker for timeProtected
   if (_weeklyTimeInterval) clearInterval(_weeklyTimeInterval);
   _weeklyTimeInterval = setInterval(() => {
-    if (vpn.isConnected) updateWeeklyStats('time');
+    if (connectionManager.isConnected) updateWeeklyStats('time');
   }, 60000);
-  sendToRenderer("vpn:state", { connected: true });
+  sendToRenderer("vpn:state", { connected: true, mode });
   updateMenu(true, trayCallbacks);
-  // Update tray tooltip with weekly stats (after updateMenu so it is not overwritten)
   const stats = store.get('weeklyStats', { threats: 0 });
   try { tray && tray.setToolTip && tray.setToolTip(`Vizoguard — ${stats.threats} threats blocked this week`); } catch {}
 });
 
-vpn.on("disconnected", () => {
+connectionManager.on("disconnected", () => {
   const duration = _vpnConnectTime ? Math.floor((Date.now() - _vpnConnectTime) / 1000) : undefined;
   logConnection('disconnected', duration !== undefined ? { duration } : {});
   _vpnConnectTime = null;
@@ -202,8 +206,7 @@ vpn.on("disconnected", () => {
   updateMenu(false, trayCallbacks);
 });
 
-vpn.on("error", (err) => {
-  // Sanitize error — strip IP:port details before sending to renderer
+connectionManager.on("error", (err) => {
   const safeMsg = (err.message || "VPN error").replace(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?/g, "[redacted]");
   logConnection('error', { message: safeMsg });
   sendToRenderer("vpn:error", { message: safeMsg });
@@ -278,11 +281,11 @@ ipcMain.handle("vpn:connect", async () => {
       sendToRenderer("vpn:state", { connected: false });
       return { success: false, error: msg, code: validation.reason };
     }
-    await vpn.connect();
-    if (!vpn.isConnected) {
+    await connectionManager.connect();
+    if (!connectionManager.isConnected) {
       return { success: false, error: "Connection was cancelled" };
     }
-    return { success: true };
+    return { success: true, mode: connectionManager.activeMode };
   } catch (err) {
     // Surface tunnel/connection errors to the UI (vpnConnect() return value is often ignored)
     const safeMsg = (err.message || "VPN error").replace(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?/g, "[redacted]");
@@ -294,7 +297,7 @@ ipcMain.handle("vpn:connect", async () => {
 
 ipcMain.handle("vpn:disconnect", async () => {
   try {
-    await vpn.disconnect();
+    await connectionManager.disconnect();
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
@@ -304,6 +307,7 @@ ipcMain.handle("vpn:disconnect", async () => {
 // Emergency restore — force-resets all network state (support recovery)
 ipcMain.handle("vpn:emergencyRestore", async () => {
   try {
+    await connectionManager.emergencyStop();
     await vpn._rollback();
     return { success: true };
   } catch (err) {
@@ -312,7 +316,7 @@ ipcMain.handle("vpn:emergencyRestore", async () => {
 });
 
 ipcMain.handle("vpn:status", () => {
-  return { connected: vpn.isConnected, state: vpn.state };
+  return { connected: connectionManager.isConnected, state: vpn.state, mode: connectionManager.activeMode };
 });
 
 ipcMain.handle("vpn:getKey", async () => {
@@ -523,7 +527,7 @@ ipcMain.handle("settings:get", () => ({
   autoConnect: store.get('autoConnect', false),
   notifications: store.get('notifications', true),
 }));
-const ALLOWED_SETTINGS = ['autoConnect', 'notifications', 'ui.engineExpanded', 'ui.settingsOpen'];
+const ALLOWED_SETTINGS = ['autoConnect', 'notifications', 'connectionMode', 'ui.engineExpanded', 'ui.settingsOpen'];
 ipcMain.handle("settings:get-one", (_e, key) => {
   if (!ALLOWED_SETTINGS.includes(key)) return undefined;
   return store.get(key);
@@ -577,7 +581,7 @@ license.onStatusChange((status) => {
     connectionMonitor.stop();
     immuneSystem.stop();
     _engineStarted = false;
-    vpn.disconnect().catch(() => {});
+    connectionManager.disconnect().catch(() => {});
   } else {
     vpn._licenseValid = true;
     updateMenu(true, trayCallbacks);
@@ -589,9 +593,8 @@ license.onStatusChange((status) => {
 // Catch uncaught exceptions — clean up VPN state and notify UI instead of crashing
 process.on('uncaughtException', (err) => {
   console.error("Uncaught exception:", err);
-  // Restore routes/DNS to prevent internet lockout
+  try { connectionManager.emergencyStop().catch(() => {}); } catch {}
   try { vpn._rollback().catch(() => {}); } catch {}
-  // Notify UI so it doesn't stay stuck on "Securing..."
   sendToRenderer("vpn:error", { message: err.message || "Unexpected error" });
   sendToRenderer("vpn:state", { connected: false });
 });
@@ -603,12 +606,13 @@ process.on('unhandledRejection', (reason) => {
 // ── App Lifecycle ─────────────────────────────
 
 app.whenReady().then(async () => {
-  // Crash recovery: restore routes/DNS in case previous session was killed
+  // Crash recovery: stop any leftover transports from previous session
+  connectionManager.emergencyStop().catch(() => {});
   vpn._rollback().catch(() => {});
 
-  // Restore routes/DNS on any exit (including force-kill via SIGTERM)
-  process.on('SIGTERM', () => { vpn._rollback().catch(() => {}).finally(() => process.exit(0)); });
-  process.on('SIGINT', () => { vpn._rollback().catch(() => {}).finally(() => process.exit(0)); });
+  // Clean up on exit
+  process.on('SIGTERM', () => { connectionManager.emergencyStop().catch(() => {}); vpn._rollback().catch(() => {}).finally(() => process.exit(0)); });
+  process.on('SIGINT', () => { connectionManager.emergencyStop().catch(() => {}); vpn._rollback().catch(() => {}).finally(() => process.exit(0)); });
 
   if (process.platform === "darwin") {
     app.dock.hide();

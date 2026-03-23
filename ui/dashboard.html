@@ -179,8 +179,15 @@
       <span class="toggle-slider"></span>
     </label>
   </div>
-  <!-- Kill switch is a planned feature and has been intentionally omitted
-       to avoid misrepresenting functionality that does not yet exist. -->
+  <div class="settings-divider"></div>
+  <div class="settings-row">
+    <span class="settings-label">Connection Mode</span>
+    <select id="select-mode" style="background:#111;color:#fff;border:1px solid #333;border-radius:6px;padding:4px 8px;font-size:0.8rem;">
+      <option value="auto">Auto</option>
+      <option value="direct">Direct</option>
+      <option value="obfuscated">Obfuscated</option>
+    </select>
+  </div>
   <div class="settings-divider"></div>
   <div class="settings-row">
     <span class="settings-label">Notifications</span>
@@ -333,6 +340,8 @@
       try {
         var autoConnect = await window.vizoguard.getSetting('autoConnect');
         document.getElementById('toggle-autoconnect').checked = !!autoConnect;
+        var connMode = await window.vizoguard.getSetting('connectionMode');
+        if (connMode) document.getElementById('select-mode').value = connMode;
         var notifications = await window.vizoguard.getSetting('notifications');
         document.getElementById('toggle-notifications').checked =
           notifications === undefined ? true : !!notifications;
@@ -358,6 +367,9 @@
   // Settings toggle change handlers
   document.getElementById('toggle-autoconnect').addEventListener('change', function() {
     window.vizoguard.setSetting('autoConnect', this.checked);
+  });
+  document.getElementById('select-mode').addEventListener('change', function() {
+    window.vizoguard.setSetting('connectionMode', this.value);
   });
   document.getElementById('toggle-notifications').addEventListener('change', function() {
     window.vizoguard.setSetting('notifications', this.checked);
