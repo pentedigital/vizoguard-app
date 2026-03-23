@@ -27,8 +27,6 @@ class ThreatChecker extends EventEmitter {
       ".pif", ".com", ".hta", ".wsf", ".apk", ".dmg", ".pkg", ".deb",
       ".rpm", ".app", ".jar", ".py", ".sh",
     ];
-    this.threatsBlocked = 0;
-
     this._loadBlocklist();
   }
 
@@ -79,7 +77,6 @@ class ThreatChecker extends EventEmitter {
     this._cacheSet(url, result);
 
     if (result.risk === "critical" || result.risk === "high") {
-      this.threatsBlocked++;
       this.emit("threat", { url, ...result });
     }
 

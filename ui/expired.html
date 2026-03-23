@@ -36,7 +36,7 @@
 </div><!-- .glass.expired-card -->
 
 <script>
-  if (window.vizoguard.platform !== 'darwin') {
+  if (window.vizoguard && window.vizoguard.platform !== 'darwin') {
     var ctrl = document.getElementById('controls');
     var minBtn = document.createElement('button');
     minBtn.className = 'titlebar-btn';
