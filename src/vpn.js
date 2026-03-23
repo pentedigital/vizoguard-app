@@ -643,16 +643,25 @@ class VpnManager extends EventEmitter {
       };
 
       sock.on("connect", () => {
-        // TCP connect succeeded — now verify Shadowsocks handshake by sending
-        // a salt + encrypted request for a test target (1.1.1.1:80)
+        // TCP connect succeeded — verify Shadowsocks handshake by sending
+        // an address header + HTTP request to 1.1.1.1:80 through the tunnel.
+        // The server only responds after the target sends data back, so we must
+        // send actual payload (not just the address header).
         try {
           const info = this._cipherInfo;
           const salt = crypto.randomBytes(info.saltLen);
           const subkey = hkdfSha1(this._masterKey, salt, "ss-subkey", info.keyLen);
           const nonce = Buffer.alloc(info.nonceLen);
+
+          // Send address header (1.1.1.1:80)
           const addrHeader = this._buildAddressHeader("1.1.1.1", 80);
-          const encrypted = aeadEncrypt(subkey, nonce, addrHeader, info.cipher, info.tagLen);
-          sock.write(Buffer.concat([salt, encrypted]));
+          const encHeader = aeadEncrypt(subkey, nonce, addrHeader, info.cipher, info.tagLen);
+          sock.write(Buffer.concat([salt, encHeader]));
+
+          // Send HTTP request so the target responds and the server relays data back
+          const httpReq = Buffer.from("GET / HTTP/1.0\r\nHost: 1.1.1.1\r\n\r\n");
+          const encPayload = aeadEncrypt(subkey, nonce, httpReq, info.cipher, info.tagLen);
+          sock.write(encPayload);
         } catch (e) {
           cleanup();
           reject(new Error(`Cipher error: ${e.message}`));
