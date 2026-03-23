@@ -130,10 +130,12 @@ class ObfuscatedTransport extends EventEmitter {
 
     try {
       if (process.platform === "win32") {
+        // WorkingDirectory must be the bin folder so sing-box finds wintun.dll
+        const binDir = path.dirname(binPath).replace(/'/g, "''");
         const escaped = binPath.replace(/'/g, "''");
         const confEscaped = configPath.replace(/'/g, "''");
         const pidEscaped = pidFile.replace(/'/g, "''");
-        const psScript = `$p = Start-Process -FilePath '${escaped}' -ArgumentList 'run','-c','${confEscaped}' -PassThru -WindowStyle Hidden; $p.Id | Out-File -FilePath '${pidEscaped}' -Encoding ascii`;
+        const psScript = `$p = Start-Process -FilePath '${escaped}' -ArgumentList 'run','-c','${confEscaped}' -WorkingDirectory '${binDir}' -PassThru -WindowStyle Hidden; $p.Id | Out-File -FilePath '${pidEscaped}' -Encoding ascii`;
         await elevatedExec(`powershell -Command "${psScript}"`);
       } else {
         const escaped = binPath.replace(/"/g, '\\"');
