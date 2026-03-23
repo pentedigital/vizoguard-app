@@ -142,17 +142,17 @@ class SecurityProxy extends EventEmitter {
       return;
     }
 
-    // Track client socket for clean shutdown
+    // Track client socket for clean shutdown (before any async work)
     if (this._sockets) {
       this._sockets.add(clientSocket);
-      clientSocket.on('close', () => this._sockets.delete(clientSocket));
+      clientSocket.on('close', () => this._sockets && this._sockets.delete(clientSocket));
     }
 
     // Allow the tunnel
     const serverSocket = net.createConnection(port, hostname, () => {
       // Check resolved IP to prevent DNS rebinding SSRF
       const addr = serverSocket.remoteAddress;
-      if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.0\.0\.0|::1|fc|fd)/.test(addr)) {
+      if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.0\.0\.0|::1$|::ffff:(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)|fc[0-9a-f]{2,}:|fd[0-9a-f]{2,}:)/i.test(addr)) {
         this.threatsBlocked++;
         serverSocket.destroy();
         clientSocket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
@@ -164,10 +164,10 @@ class SecurityProxy extends EventEmitter {
       clientSocket.pipe(serverSocket);
     });
 
-    // Track outbound socket for clean shutdown
+    // Track outbound socket immediately (before connect callback fires)
     if (this._sockets) {
       this._sockets.add(serverSocket);
-      serverSocket.on("close", () => this._sockets.delete(serverSocket));
+      serverSocket.on("close", () => this._sockets && this._sockets.delete(serverSocket));
     }
 
     serverSocket.on("error", () => clientSocket.end());

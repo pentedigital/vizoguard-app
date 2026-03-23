@@ -534,7 +534,7 @@
     // License status
     var status = await window.vizoguard.getLicenseStatus();
     if (status) {
-      var masked = maskKey(status.key);
+      var masked = status.key || '';  // already masked by main process
       document.getElementById('license-display').textContent = masked;
       document.getElementById('settings-license-key').textContent = masked;
       if (status.expires) {

@@ -524,8 +524,10 @@ async function startSecurityEngine() {
   try {
     await securityProxy.start();
   } catch (e) {
+    _engineStarted = false;
     console.error("Security proxy failed to start:", e.message);
     sendToRenderer("security:error", { message: `Security proxy unavailable: ${e.message}` });
+    return;
   }
   connectionMonitor.start();
   immuneSystem.start();
@@ -615,7 +617,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("second-instance", () => {
-  if (mainWindow) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.focus();

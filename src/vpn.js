@@ -266,8 +266,12 @@ class VpnManager extends EventEmitter {
       this._sockets.clear();
     }
     if (this._server) {
-      await new Promise(resolve => this._server.close(resolve));
+      const srv = this._server;
       this._server = null;
+      await new Promise(resolve => {
+        const t = setTimeout(resolve, 3000);
+        srv.close(() => { clearTimeout(t); resolve(); });
+      });
     }
     this._stopTunnelHealthCheck();
     this._remoteHost = null;
@@ -497,6 +501,7 @@ class VpnManager extends EventEmitter {
     remote.on("error", (err) => {
       console.error("Tunnel error:", err.message);
       this._tunnelFailures++;
+      remote.destroy();
       client.end();
     });
 

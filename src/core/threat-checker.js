@@ -107,9 +107,18 @@ class ThreatChecker extends EventEmitter {
 
     // 3. Brand impersonation
     for (const brand of this._brandNames) {
-      if (hostname.includes(brand) && !hostname.endsWith(`.${brand}.com`) && hostname !== `${brand}.com` && hostname !== `www.${brand}.com`) {
-        checks.push({ name: "brand_impersonation", risk: "high", detail: `Possible ${brand} impersonation` });
-        break;
+      if (hostname.includes(brand)) {
+        // Allow legitimate domains: brand.com, *.brand.com, and known secondary TLDs
+        const legit = hostname === `${brand}.com` || hostname === `www.${brand}.com`
+          || hostname.endsWith(`.${brand}.com`) || hostname.endsWith(`.${brand}.net`)
+          || hostname.endsWith(`.${brand}.org`) || hostname.endsWith(`.${brand}.io`)
+          || hostname.endsWith(`${brand}apis.com`) || hostname.endsWith(`${brand}cdn.com`)
+          || hostname.endsWith(`${brand}cdn.net`) || hostname.endsWith(`${brand}online.com`)
+          || hostname.endsWith(`${brand}content.com`) || hostname.endsWith(`${brand}objects.com`);
+        if (!legit) {
+          checks.push({ name: "brand_impersonation", risk: "high", detail: `Possible ${brand} impersonation` });
+          break;
+        }
       }
     }
 
