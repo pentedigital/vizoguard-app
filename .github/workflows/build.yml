@@ -124,22 +124,37 @@ jobs:
 
       - name: Upload installers to VPS
         run: |
-          DMG=$(ls dist/*.dmg | head -1)
-          EXE=$(ls dist/*.exe | head -1)
-
-          VERSION=$(echo "$DMG" | grep -oP '\d+\.\d+\.\d+' | head -1)
+          VERSION=$(node -p "require('./package.json').version")
           echo "Deploying version: $VERSION"
 
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            "$DMG" root@${{ secrets.VPS_HOST }}:/var/www/vizoguard/downloads/Vizoguard-${VERSION}.dmg
+          # Upload Mac DMGs (x64 + arm64 separately)
+          DMG_X64=$(ls dist/Vizoguard-${VERSION}.dmg 2>/dev/null || ls dist/*-${VERSION}.dmg 2>/dev/null | grep -v arm64 | head -1)
+          DMG_ARM=$(ls dist/Vizoguard-${VERSION}-arm64.dmg 2>/dev/null || echo "")
+          EXE=$(ls dist/*.exe | head -1)
+
+          if [ -n "$DMG_X64" ]; then
+            scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+              "$DMG_X64" root@${{ secrets.VPS_HOST }}:/var/www/vizoguard/downloads/Vizoguard-${VERSION}.dmg
+          fi
+
+          if [ -n "$DMG_ARM" ]; then
+            scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+              "$DMG_ARM" root@${{ secrets.VPS_HOST }}:/var/www/vizoguard/downloads/Vizoguard-${VERSION}-arm64.dmg
+          fi
 
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             "$EXE" root@${{ secrets.VPS_HOST }}:/var/www/vizoguard/downloads/Vizoguard-Setup-${VERSION}.exe
 
+          # Upload auto-update feeds
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            dist/latest-mac.yml dist/latest.yml \
+            root@${{ secrets.VPS_HOST }}:/var/www/vizoguard/downloads/
+
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no root@${{ secrets.VPS_HOST }} \
             "cd /var/www/vizoguard/downloads && \
-             ln -sf Vizoguard-${VERSION}.dmg Vizoguard-latest.dmg && \
-             ln -sf Vizoguard-Setup-${VERSION}.exe Vizoguard-Setup-latest.exe && \
+             cp Vizoguard-${VERSION}.dmg Vizoguard-latest.dmg && \
+             [ -f Vizoguard-${VERSION}-arm64.dmg ] && cp Vizoguard-${VERSION}-arm64.dmg Vizoguard-latest-arm64.dmg || true && \
+             cp Vizoguard-Setup-${VERSION}.exe Vizoguard-Setup-latest.exe && \
              ls -lh"
 
       - name: Notify success

@@ -37,7 +37,7 @@ class Updater extends EventEmitter {
   }
 
   check() {
-    autoUpdater.checkForUpdatesAndNotify();
+    autoUpdater.checkForUpdates();
   }
 
   install() {
