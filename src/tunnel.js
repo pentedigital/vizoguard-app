@@ -34,12 +34,24 @@ class Tunnel extends EventEmitter {
     const ext = process.platform === "win32" ? ".exe" : "";
     const binName = `tun2socks${ext}`;
 
-    // extraFiles places binaries at <install-dir>/bin/, not resources/bin/
+    // extraFiles: <install-dir>/bin/ — go up from resources/ to find it
     const base = app.isPackaged
-      ? path.join(path.dirname(app.getPath("exe")), "bin")
+      ? path.join(process.resourcesPath, "..", "bin")
       : path.join(__dirname, "..", "bin", `${platform}-${arch}`);
 
-    return path.join(base, binName);
+    const binPath = path.join(base, binName);
+
+    // Fail fast if binary doesn't exist
+    if (!fs.existsSync(binPath)) {
+      throw new Error(`tun2socks binary not found at ${binPath}`);
+    }
+
+    // Ensure executable permission (macOS packaging can strip it)
+    if (process.platform !== "win32") {
+      try { fs.chmodSync(binPath, 0o755); } catch {}
+    }
+
+    return binPath;
   }
 
   _getPidFile() {

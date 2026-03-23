@@ -39,12 +39,24 @@ class ObfuscatedTransport extends EventEmitter {
     const arch = process.arch === "arm64" ? "arm64" : "amd64";
     const ext = process.platform === "win32" ? ".exe" : "";
 
-    // extraFiles places binaries at <install-dir>/bin/, not resources/bin/
+    // extraFiles: <install-dir>/bin/ — go up from resources/ to find it
     const base = app.isPackaged
-      ? path.join(path.dirname(app.getPath("exe")), "bin")
+      ? path.join(process.resourcesPath, "..", "bin")
       : path.join(__dirname, "..", "..", "bin", `${platform}-${arch}`);
 
-    return path.join(base, `sing-box${ext}`);
+    const binPath = path.join(base, `sing-box${ext}`);
+
+    // Fail fast if binary doesn't exist
+    if (!fs.existsSync(binPath)) {
+      throw new Error(`sing-box binary not found at ${binPath}`);
+    }
+
+    // Ensure executable permission (macOS packaging can strip it)
+    if (process.platform !== "win32") {
+      try { fs.chmodSync(binPath, 0o755); } catch {}
+    }
+
+    return binPath;
   }
 
   _getConfigPath() {
@@ -114,17 +126,22 @@ class ObfuscatedTransport extends EventEmitter {
     try { fs.unlinkSync(pidFile); } catch {}
 
     console.log(`Starting sing-box (obfuscated): ${binPath}`);
+    console.log(`Config: ${configPath}, PID file: ${pidFile}`);
 
-    if (process.platform === "win32") {
-      const escaped = binPath.replace(/'/g, "''");
-      const confEscaped = configPath.replace(/'/g, "''");
-      const pidEscaped = pidFile.replace(/'/g, "''");
-      const psScript = `$p = Start-Process -FilePath '${escaped}' -ArgumentList 'run','-c','${confEscaped}' -PassThru -WindowStyle Hidden; $p.Id | Out-File -FilePath '${pidEscaped}' -Encoding ascii`;
-      await elevatedExec(`powershell -Command "${psScript}"`);
-    } else {
-      const escaped = binPath.replace(/"/g, '\\"');
-      const confEscaped = configPath.replace(/"/g, '\\"');
-      await elevatedExec(`"${escaped}" run -c "${confEscaped}" & echo $! > "${pidFile}"`);
+    try {
+      if (process.platform === "win32") {
+        const escaped = binPath.replace(/'/g, "''");
+        const confEscaped = configPath.replace(/'/g, "''");
+        const pidEscaped = pidFile.replace(/'/g, "''");
+        const psScript = `$p = Start-Process -FilePath '${escaped}' -ArgumentList 'run','-c','${confEscaped}' -PassThru -WindowStyle Hidden; $p.Id | Out-File -FilePath '${pidEscaped}' -Encoding ascii`;
+        await elevatedExec(`powershell -Command "${psScript}"`);
+      } else {
+        const escaped = binPath.replace(/"/g, '\\"');
+        const confEscaped = configPath.replace(/"/g, '\\"');
+        await elevatedExec(`"${escaped}" run -c "${confEscaped}" & echo $! > "${pidFile}"`);
+      }
+    } catch (e) {
+      throw new Error(`Failed to launch sing-box: ${e.message}`);
     }
 
     // Wait for PID (max 8s)
@@ -139,11 +156,18 @@ class ObfuscatedTransport extends EventEmitter {
     }
 
     if (!pid) {
-      throw new Error("sing-box failed to start — could not read PID");
+      throw new Error("sing-box failed to start — could not read PID. Check binary path and permissions.");
+    }
+
+    // Verify the process is actually alive (not just a stale PID)
+    try {
+      process.kill(pid, 0);
+    } catch {
+      throw new Error(`sing-box process ${pid} exited immediately — check config or permissions`);
     }
 
     this._pid = pid;
-    console.log(`sing-box PID: ${pid}`);
+    console.log(`sing-box PID: ${pid} (verified alive)`);
 
     // Wait for TUN interface (max 8s)
     let found = false;
