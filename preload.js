@@ -11,7 +11,6 @@ contextBridge.exposeInMainWorld("vizoguard", {
   vpnDisconnect: () => ipcRenderer.invoke("vpn:disconnect"),
   vpnEmergencyRestore: () => ipcRenderer.invoke("vpn:emergencyRestore"),
   vpnStatus: () => ipcRenderer.invoke("vpn:status"),
-  getVpnKey: () => ipcRenderer.invoke("vpn:getKey"),
   copyVpnKey: () => ipcRenderer.invoke("vpn:copyKey"),
 
   // Security

@@ -270,6 +270,7 @@ class VpnManager extends EventEmitter {
 
     this._state = "connected";  // Set AFTER license check passes
     this._tunnelFailures = 0;
+    this._startTunnelHealthCheck();
 
     // Start watchdog monitor
     this._monitor = new Monitor(this._tunnel, this._routes, this._dns, Tunnel.TUN_GW);

@@ -7,6 +7,9 @@ const { EventEmitter } = require("events");
 const { app } = require("electron");
 const { elevatedExec } = require("./elevation");
 
+// Safe shell escaping — wraps in single quotes, escapes embedded single quotes
+function shellEscape(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
+
 const TUN_IP = "10.0.85.2";
 const TUN_GW = "10.0.85.1";
 const TUN_MASK = "255.255.255.0";
@@ -81,8 +84,9 @@ class Tunnel extends EventEmitter {
       await elevatedExec(`powershell -Command "${psScript}"`);
     } else {
       // macOS: launch via sudo in background, capture PID
-      const escaped = binPath.replace(/"/g, '\\"');
-      await elevatedExec(`"${escaped}" -device ${device} -proxy socks5://127.0.0.1:${socksPort} & echo $! > "${pidFile}"`);
+      const escaped = shellEscape(binPath);
+      const pidEsc = shellEscape(pidFile);
+      await elevatedExec(`${escaped} -device ${device} -proxy socks5://127.0.0.1:${socksPort} & echo $! > ${pidEsc}`);
     }
 
     // Wait for PID file (max 8s)

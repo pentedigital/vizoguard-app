@@ -11,6 +11,9 @@ const { EventEmitter } = require("events");
 const { app } = require("electron");
 const { elevatedExec } = require("../elevation");
 
+// Safe shell escaping — wraps in single quotes, escapes embedded single quotes
+function shellEscape(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
+
 // VLESS UUID — shared transport credential (user auth is at license level)
 const VLESS_UUID = "f6cb19fc-7b10-4787-a63a-e41f64707534";
 const VLESS_SERVER = "vizoguard.com";
@@ -138,9 +141,10 @@ class ObfuscatedTransport extends EventEmitter {
         const psScript = `$p = Start-Process -FilePath '${escaped}' -ArgumentList 'run','-c','${confEscaped}' -WorkingDirectory '${binDir}' -PassThru -WindowStyle Hidden; $p.Id | Out-File -FilePath '${pidEscaped}' -Encoding ascii`;
         await elevatedExec(`powershell -Command "${psScript}"`);
       } else {
-        const escaped = binPath.replace(/"/g, '\\"');
-        const confEscaped = configPath.replace(/"/g, '\\"');
-        await elevatedExec(`"${escaped}" run -c "${confEscaped}" & echo $! > "${pidFile}"`);
+        const escaped = shellEscape(binPath);
+        const confEscaped = shellEscape(configPath);
+        const pidEsc = shellEscape(pidFile);
+        await elevatedExec(`${escaped} run -c ${confEscaped} & echo $! > ${pidEsc}`);
       }
     } catch (e) {
       throw new Error(`Failed to launch sing-box: ${e.message}`);

@@ -95,7 +95,7 @@ Apps will show:
 
 ## IPC Channels
 - `license:activate`, `license:status` — license management
-- `vpn:connect`, `vpn:disconnect`, `vpn:status`, `vpn:getKey` — VPN control
+- `vpn:connect`, `vpn:disconnect`, `vpn:status`, `vpn:copyKey` — VPN control
 - `security:stats` — threat/connection counts
 - `update:install` — install pending update
 - `app:openExternal`, `app:minimize`, `app:close` — window controls
@@ -117,7 +117,6 @@ Apps will show:
 - `src/api.js` rejects with `{ httpStatus, ...json }` — use `err.httpStatus` for HTTP code (not `err.status` which is the JSON body's status field like "expired"/"suspended")
 - `src/api.js` retries 5xx and network errors (max 2 retries, 1s/2s backoff) — 4xx errors throw immediately
 - License key regex is uppercase hex only (`/^VIZO-[0-9A-F]{4}(-[0-9A-F]{4}){3}$/`) — must match server validation
-- `vpn:getKey` IPC tries `/vpn/get` first (with device_id), falls back to `/vpn/create` on 404 — both require `device_id` in params
 - `vpn.connect()` uses `_connecting` flag with `try/finally` to ensure cleanup on any error — never remove the finally block
 - `vpn._licenseValid` is set by `main.js` license status handler — connect() checks it after completing to auto-disconnect if license expired during setup
 - `startSecurityEngine()` is guarded by `_engineStarted` flag — reset to `false` when license becomes invalid so engine can restart on revalidation

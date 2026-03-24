@@ -121,6 +121,13 @@ class ConnectionManager extends EventEmitter {
 
     try {
       await transport.start();
+      // If disconnect was called while transport.start() was in-flight, tear down
+      if (this._aborted) {
+        try { await transport.stop(); } catch {}
+        transport.removeListener("error", onError);
+        transport.removeListener("disconnected", onDisconnected);
+        return;
+      }
       this._active = transport;
       this.emit("connected", { mode: transport.name });
     } catch (e) {

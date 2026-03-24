@@ -166,6 +166,7 @@ class LicenseManager {
   // Transfer license to this device (called when user confirms device transfer)
   async transferToThisDevice() {
     const key = this.store.get("license.key");
+    if (!key) throw new Error("No license key stored");
     const deviceId = await platform.getDeviceId();
 
     const result = await apiCall("/license/transfer", { key, device_id: deviceId });
