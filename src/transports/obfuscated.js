@@ -11,7 +11,7 @@ const path = require("path");
 const fs = require("fs");
 const { EventEmitter } = require("events");
 const { app } = require("electron");
-const { elevatedExec } = require("../elevation");
+const { elevatedExec, elevatedBatch } = require("../elevation");
 
 // Safe shell escaping — wraps in single quotes, escapes embedded single quotes
 function shellEscape(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
@@ -183,30 +183,29 @@ class ObfuscatedTransport extends EventEmitter {
         const currentGw = match ? match[1] : null;
 
         if (!currentGw) {
-          // No default route at all — sing-box removed it but didn't restore
           console.warn("No default route after sing-box stop — restoring");
           await elevatedExec(`/sbin/route add default ${this._originalGateway}`);
           console.log(`Restored default route → ${this._originalGateway}`);
         } else if (currentGw === "10.0.85.1") {
-          // Still pointing at TUN gateway — sing-box didn't clean up
           console.warn("Default route still points to TUN — restoring");
-          await elevatedExec(`/sbin/route delete default`).catch(() => {});
-          await elevatedExec(`/sbin/route add default ${this._originalGateway}`);
+          await elevatedBatch([
+            `/sbin/route delete default || true`,
+            `/sbin/route add default ${this._originalGateway}`
+          ]);
           console.log(`Restored default route → ${this._originalGateway}`);
         }
       } else {
         const { stdout } = await execFileAsync("route", ["print", "0.0.0.0"]);
-        // Check if TUN route (10.0.85.1) is still the default with low metric
+        const cmds = [];
         if (stdout.includes("10.0.85.1")) {
-          console.warn("TUN route still present after sing-box stop — removing");
-          await elevatedExec("route delete 0.0.0.0 mask 0.0.0.0 10.0.85.1").catch(() => {});
-          console.log("Removed stale TUN default route");
+          cmds.push("route delete 0.0.0.0 mask 0.0.0.0 10.0.85.1 || ver>nul");
         }
-        // Verify original gateway route exists
         if (!stdout.includes(this._originalGateway)) {
-          console.warn("Original gateway route missing — restoring");
-          await elevatedExec(`route add 0.0.0.0 mask 0.0.0.0 ${this._originalGateway} metric 25`).catch(() => {});
-          console.log(`Restored default route → ${this._originalGateway}`);
+          cmds.push(`route add 0.0.0.0 mask 0.0.0.0 ${this._originalGateway} metric 25`);
+        }
+        if (cmds.length > 0) {
+          await elevatedBatch(cmds, { ignoreErrors: true });
+          console.log(`Restored routes (${cmds.length} commands)`);
         }
       }
     } catch (e) {

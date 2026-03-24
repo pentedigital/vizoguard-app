@@ -11,6 +11,7 @@ const { ThreatChecker, ConnectionMonitor, SecurityProxy, ImmuneSystem } = requir
 const { createTray, updateMenu, destroyTray } = require("./src/tray");
 const Updater = require("./src/updater");
 const { apiCall } = require("./src/api");
+const { shutdownDaemon } = require("./src/elevation");
 
 // Single instance lock
 if (!app.requestSingleInstanceLock()) {
@@ -116,6 +117,7 @@ const trayCallbacks = {
     immuneSystem.stop();
     securityProxy.stop();
     await vpn.disconnect().catch(() => {});
+    await shutdownDaemon().catch(() => {});
     destroyTray();
     mainWindow = null;
     app.exit(0);
@@ -591,8 +593,8 @@ app.whenReady().then(async () => {
   vpn._rollback().catch(() => {});
 
   // Clean up on exit
-  process.on('SIGTERM', () => { connectionManager.emergencyStop().catch(() => {}); vpn._rollback().catch(() => {}).finally(() => process.exit(0)); });
-  process.on('SIGINT', () => { connectionManager.emergencyStop().catch(() => {}); vpn._rollback().catch(() => {}).finally(() => process.exit(0)); });
+  process.on('SIGTERM', () => { connectionManager.emergencyStop().catch(() => {}); vpn._rollback().catch(() => {}).finally(() => { shutdownDaemon().catch(() => {}); process.exit(0); }); });
+  process.on('SIGINT', () => { connectionManager.emergencyStop().catch(() => {}); vpn._rollback().catch(() => {}).finally(() => { shutdownDaemon().catch(() => {}); process.exit(0); }); });
 
   if (process.platform === "darwin") {
     app.dock.hide();

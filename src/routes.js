@@ -1,7 +1,7 @@
 const { execFile } = require("child_process");
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
-const { elevatedExec } = require("./elevation");
+const { elevatedExec, elevatedBatch } = require("./elevation");
 
 const STRICT_IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/;
 
@@ -43,6 +43,7 @@ class Routes {
   // Set TUN as default route, preserve route to VPN server
   async apply(tunGateway, vpnServerIp) {
     this._vpnServerIp = vpnServerIp;
+    this._tunGateway = tunGateway;
 
     if (!this._originalGateway) {
       throw new Error("Must call save() before apply()");
@@ -108,17 +109,70 @@ class Routes {
     }
   }
 
+  // Mark as applied/restored after external batch execution
+  markApplied() { this._applied = true; }
+  markRestored() { this._applied = false; }
+
+  // Return commands for batched execution (avoids multiple admin prompts)
+  getApplyCommands(tunGateway, vpnServerIp) {
+    this._vpnServerIp = vpnServerIp;
+    this._tunGateway = tunGateway;
+    if (!this._originalGateway) throw new Error("Must call save() before getApplyCommands()");
+
+    assertIp(tunGateway, "tunGateway");
+    assertIp(vpnServerIp, "vpnServerIp");
+    assertIp(this._originalGateway, "originalGateway");
+
+    if (process.platform === "darwin") {
+      return [
+        `/sbin/route add -host ${vpnServerIp} ${this._originalGateway}`,
+        `/sbin/route delete default || true`,
+        `/sbin/route add default ${tunGateway}`
+      ];
+    } else {
+      return [
+        `route add ${vpnServerIp} mask 255.255.255.255 ${this._originalGateway}`,
+        `route add 0.0.0.0 mask 0.0.0.0 ${tunGateway} metric 5`
+      ];
+    }
+  }
+
+  getRestoreCommands() {
+    if (!this._originalGateway) return [];
+    const gw = this._tunGateway || "10.0.85.1";
+
+    if (process.platform === "darwin") {
+      assertIp(this._originalGateway, "originalGateway");
+      const cmds = [
+        `/sbin/route delete default || true`,
+        `/sbin/route add default ${this._originalGateway}`
+      ];
+      if (this._vpnServerIp) {
+        assertIp(this._vpnServerIp, "vpnServerIp");
+        cmds.push(`/sbin/route delete -host ${this._vpnServerIp} || true`);
+      }
+      return cmds;
+    } else {
+      assertIp(gw, "tunGateway");
+      const cmds = [`route delete 0.0.0.0 mask 0.0.0.0 ${gw} || ver>nul`];
+      if (this._vpnServerIp) {
+        assertIp(this._vpnServerIp, "vpnServerIp");
+        cmds.push(`route delete ${this._vpnServerIp} || ver>nul`);
+      }
+      return cmds;
+    }
+  }
+
   async _applyDarwin(tunGateway, vpnServerIp) {
     assertIp(tunGateway, "tunGateway");
     assertIp(vpnServerIp, "vpnServerIp");
     assertIp(this._originalGateway, "originalGateway");
 
-    // 1. Preserve route to VPN server through original gateway
-    await elevatedExec(`/sbin/route add -host ${vpnServerIp} ${this._originalGateway}`);
-
-    // 2. Replace default route with TUN gateway
-    await elevatedExec(`/sbin/route delete default`).catch(() => {});
-    await elevatedExec(`/sbin/route add default ${tunGateway}`);
+    await elevatedBatch([
+      `/sbin/route add -host ${vpnServerIp} ${this._originalGateway}`,
+      `/sbin/route delete default || true`,
+      `/sbin/route add default ${tunGateway}`
+    ]);
 
     console.log(`Routes applied: default → ${tunGateway}, ${vpnServerIp} → ${this._originalGateway}`);
   }
@@ -126,15 +180,15 @@ class Routes {
   async _restoreDarwin() {
     assertIp(this._originalGateway, "originalGateway");
 
-    // 1. Restore original default route (must happen before tun2socks dies)
-    await elevatedExec(`/sbin/route delete default`).catch(() => {});
-    await elevatedExec(`/sbin/route add default ${this._originalGateway}`);
-
-    // 2. Remove VPN server host route
+    const cmds = [
+      `/sbin/route delete default || true`,
+      `/sbin/route add default ${this._originalGateway}`
+    ];
     if (this._vpnServerIp) {
       assertIp(this._vpnServerIp, "vpnServerIp");
-      await elevatedExec(`/sbin/route delete -host ${this._vpnServerIp}`).catch(() => {});
+      cmds.push(`/sbin/route delete -host ${this._vpnServerIp} || true`);
     }
+    await elevatedBatch(cmds);
 
     console.log(`Routes restored: default → ${this._originalGateway}`);
   }
@@ -168,24 +222,23 @@ class Routes {
     assertIp(vpnServerIp, "vpnServerIp");
     assertIp(this._originalGateway, "originalGateway");
 
-    // 1. Preserve route to VPN server through original gateway
-    await elevatedExec(`route add ${vpnServerIp} mask 255.255.255.255 ${this._originalGateway}`);
-
-    // 2. Add TUN as default route with low metric (higher priority)
-    await elevatedExec(`route add 0.0.0.0 mask 0.0.0.0 ${tunGateway} metric 5`);
+    await elevatedBatch([
+      `route add ${vpnServerIp} mask 255.255.255.255 ${this._originalGateway}`,
+      `route add 0.0.0.0 mask 0.0.0.0 ${tunGateway} metric 5`
+    ]);
 
     console.log(`Routes applied: 0.0.0.0/0 → ${tunGateway} (metric 5), ${vpnServerIp} → ${this._originalGateway}`);
   }
 
   async _restoreWin32() {
-    // 1. Remove TUN default route
-    await elevatedExec(`route delete 0.0.0.0 mask 0.0.0.0 10.0.85.1`).catch(() => {});
-
-    // 2. Remove VPN server host route
+    const gw = this._tunGateway || "10.0.85.1";
+    assertIp(gw, "tunGateway");
+    const cmds = [`route delete 0.0.0.0 mask 0.0.0.0 ${gw} || ver>nul`];
     if (this._vpnServerIp) {
       assertIp(this._vpnServerIp, "vpnServerIp");
-      await elevatedExec(`route delete ${this._vpnServerIp}`).catch(() => {});
+      cmds.push(`route delete ${this._vpnServerIp} || ver>nul`);
     }
+    await elevatedBatch(cmds);
 
     console.log(`Routes restored: removed TUN routes`);
   }

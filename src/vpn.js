@@ -5,6 +5,7 @@ const Tunnel = require("./tunnel");
 const Routes = require("./routes");
 const Dns = require("./dns");
 const Monitor = require("./monitor");
+const { elevatedBatch } = require("./elevation");
 
 // Shadowsocks AEAD client — local SOCKS5 proxy tunneling through Outline VPS
 // Implements chacha20-ietf-poly1305 and aes-256-gcm AEAD ciphers
@@ -322,16 +323,25 @@ class VpnManager extends EventEmitter {
       this.emit("warning", verifyErr.message);
     }
 
-    // Step 3: Start tun2socks (elevated — prompts for admin)
+    // Step 3: Start tun2socks (elevated — prompts for admin once)
     await this._tunnel.start(SOCKS_PORT);
 
-    // Step 5: Save originals and switch routes to TUN (before DNS to prevent leaks)
+    // Step 4: Save originals, then batch routes + DNS into a single elevated call
+    // Atomic: if batch fails, rollback immediately to prevent half-configured state
     await this._routes.save();
     await this._dns.save();
-    await this._routes.apply(Tunnel.TUN_GW, this._remoteHost);
-
-    // Step 6: Set DNS (after routes — prevents DNS leak outside tunnel)
-    await this._dns.apply();
+    const routeCmds = this._routes.getApplyCommands(Tunnel.TUN_GW, this._remoteHost);
+    const dnsCmds = this._dns.getApplyCommands();
+    try {
+      await elevatedBatch([...routeCmds, ...dnsCmds]);
+      this._routes.markApplied();
+      this._dns.markApplied();
+      console.log(`Routes + DNS applied in single elevated call (${routeCmds.length + dnsCmds.length} commands)`);
+    } catch (e) {
+      console.error("Routes + DNS batch failed, rolling back:", e.message);
+      await this._rollback();
+      throw e;
+    }
   }
 
   // Single rollback — reverse of connect: DNS first, then routes, then kill tunnel, then stop SOCKS
@@ -346,13 +356,21 @@ class VpnManager extends EventEmitter {
     this._stopTunnelHealthCheck();
     this._tunnel.removeAllListeners();
 
-    // 2. Restore DNS (reverse of connect step 6)
-    try { await this._dns.restore(); } catch (e) { console.error("Rollback DNS:", e.message); }
+    // 2. Batch restore DNS + routes in a single elevated call (BEFORE killing tun2socks)
+    try {
+      const dnsCmds = this._dns.getRestoreCommands();
+      const routeCmds = this._routes.getRestoreCommands();
+      const allCmds = [...dnsCmds, ...routeCmds];
+      if (allCmds.length > 0) {
+        await elevatedBatch(allCmds, { ignoreErrors: true });
+        console.log(`DNS + routes restored in single elevated call (${allCmds.length} commands)`);
+      }
+    } catch (e) { console.error("Rollback DNS+routes:", e.message); }
+    // Reset internal state flags regardless — we've done our best to restore
+    this._dns.markRestored();
+    this._routes.markRestored();
 
-    // 3. Restore routes (reverse of connect step 5, BEFORE killing tun2socks)
-    try { await this._routes.restore(); } catch (e) { console.error("Rollback routes:", e.message); }
-
-    // 4. Kill tun2socks
+    // 3. Kill tun2socks
     this._tunnel.stop();
 
     // 5. Destroy SOCKS sockets and server

@@ -15,6 +15,10 @@ files:
 asarUnpack:
   - "bin/**/*"
 
+extraResources:
+  - from: "src/elevation-daemon.js"
+    to: "elevation-daemon.js"
+
 extraFiles:
   - from: "bin/darwin-${arch}"
     to: "bin"

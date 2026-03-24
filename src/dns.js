@@ -1,7 +1,7 @@
 const { execFile } = require("child_process");
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
-const { elevatedExec } = require("./elevation");
+const { elevatedExec, elevatedBatch } = require("./elevation");
 
 const TUNNEL_DNS = ["9.9.9.9", "1.1.1.1"];
 const STRICT_IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/;
@@ -35,6 +35,58 @@ class Dns {
     } else {
       await this._saveWin32();
     }
+  }
+
+  // Mark as applied/restored after external batch execution
+  markApplied() {
+    this._applied = true;
+    this._ipv6Disabled = true;
+  }
+  markRestored() {
+    this._applied = false;
+    this._ipv6Disabled = false;
+  }
+
+  // Return commands for batched execution (avoids multiple admin prompts)
+  getApplyCommands() {
+    if (process.platform === "darwin") {
+      if (!this._service) return [];
+      assertServiceName(this._service);
+      return [
+        `/usr/sbin/networksetup -setdnsservers "${this._service}" ${TUNNEL_DNS.join(" ")}`,
+        `/usr/sbin/networksetup -setv6off "${this._service}"`
+      ];
+    } else {
+      return [
+        `netsh interface ip set dns "vizoguard" static ${TUNNEL_DNS[0]}`,
+        `netsh interface ip add dns "vizoguard" ${TUNNEL_DNS[1]} index=2`,
+        `reg add "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters" /v DisabledComponents /t REG_DWORD /d 0xFF /f`
+      ];
+    }
+  }
+
+  getRestoreCommands() {
+    const cmds = [];
+    if (process.platform === "darwin") {
+      if (this._service) {
+        assertServiceName(this._service);
+        if (this._originalServers && this._originalServers.length > 0) {
+          this._originalServers.forEach(s => assertIp(s, "originalDnsServer"));
+          cmds.push(`/usr/sbin/networksetup -setdnsservers "${this._service}" ${this._originalServers.join(" ")}`);
+        } else {
+          cmds.push(`/usr/sbin/networksetup -setdnsservers "${this._service}" Empty`);
+        }
+        if (this._ipv6Disabled) {
+          cmds.push(`/usr/sbin/networksetup -setv6automatic "${this._service}"`);
+        }
+      }
+    } else {
+      // Windows: DNS was on TUN interface, no restore needed. Just re-enable IPv6.
+      if (this._ipv6Disabled) {
+        cmds.push(`reg add "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters" /v DisabledComponents /t REG_DWORD /d 0x0 /f`);
+      }
+    }
+    return cmds;
   }
 
   // Set tunnel-safe DNS servers and disable IPv6 to prevent leaks
@@ -128,13 +180,10 @@ class Dns {
     if (!this._service) return;
     assertServiceName(this._service);
 
-    if (this._originalServers && this._originalServers.length > 0) {
-      this._originalServers.forEach(s => assertIp(s, "originalDnsServer"));
-      await elevatedExec(`/usr/sbin/networksetup -setdnsservers "${this._service}" ${this._originalServers.join(" ")}`);
-    } else {
-      // Restore to DHCP DNS (empty = automatic)
-      await elevatedExec(`/usr/sbin/networksetup -setdnsservers "${this._service}" Empty`);
-    }
+    const cmd = (this._originalServers && this._originalServers.length > 0)
+      ? (() => { this._originalServers.forEach(s => assertIp(s, "originalDnsServer")); return `/usr/sbin/networksetup -setdnsservers "${this._service}" ${this._originalServers.join(" ")}`; })()
+      : `/usr/sbin/networksetup -setdnsservers "${this._service}" Empty`;
+    await elevatedExec(cmd);
     console.log(`DNS restored on ${this._service}`);
   }
 

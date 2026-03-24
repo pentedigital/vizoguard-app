@@ -18,11 +18,16 @@ const mockElevatedExec = mock.fn(async (cmd) => {
 });
 
 const elevationPath = path.resolve(__dirname, "../src/elevation.js");
+const mockElevatedBatch = mock.fn(async (cmds) => {
+  for (const cmd of cmds) executedCommands.push(cmd);
+  return { stdout: "", stderr: "" };
+});
+
 require.cache[elevationPath] = {
   id: elevationPath,
   filename: elevationPath,
   loaded: true,
-  exports: { elevatedExec: mockElevatedExec },
+  exports: { elevatedExec: mockElevatedExec, elevatedBatch: mockElevatedBatch },
 };
 
 const Dns = require("../src/dns");
