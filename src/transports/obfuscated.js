@@ -128,7 +128,7 @@ class ObfuscatedTransport extends EventEmitter {
       throw new Error("Invalid sing-box config: no inbounds defined");
     }
     const tun = config.inbounds.find(i => i.type === "tun");
-    if (!tun || !tun.address || !tun.address.length) {
+    if (!tun || (!tun.inet4_address && (!tun.address || !tun.address.length))) {
       throw new Error("Invalid sing-box config: TUN inbound missing or has no address");
     }
     // Ensure route rules exist with server IP bypass (prevents routing loop)
@@ -236,17 +236,22 @@ class ObfuscatedTransport extends EventEmitter {
     // where sing-box's own outbound gets caught by its TUN
     const serverIpRules = serverIps.map(ip => `${ip}/32`);
 
+    // sing-box 1.6 compat: use inet4_address (not address), platform-specific TUN name
+    const tunName = process.platform === "win32" ? "vizoguard" : undefined;
+    const tunInbound = {
+      type: "tun",
+      inet4_address: "10.0.85.1/30",
+      auto_route: true,
+      strict_route: true,
+      sniff: true,
+      sniff_override_destination: false,
+      stack: "system"
+    };
+    if (tunName) tunInbound.interface_name = tunName;
+
     return {
       log: { level: "warn" },
-      inbounds: [{
-        type: "tun",
-        interface_name: "vizoguard",
-        address: ["10.0.85.1/30"],
-        auto_route: true,
-        strict_route: true,
-        sniff: true,
-        stack: "system"
-      }],
+      inbounds: [tunInbound],
       outbounds: [{
         type: "vless",
         tag: "proxy",

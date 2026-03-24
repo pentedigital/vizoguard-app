@@ -267,7 +267,11 @@ describe("ObfuscatedTransport._generateConfig", () => {
     assert.equal(config.outbounds[0].server_port, 443);
     assert.ok(config.outbounds[0].uuid);
     assert.equal(config.inbounds[0].type, "tun");
-    assert.equal(config.inbounds[0].interface_name, "vizoguard");
+    assert.ok(config.inbounds[0].inet4_address, "TUN must have inet4_address");
+    // interface_name only set on Windows (macOS uses system-assigned utunN)
+    if (process.platform === "win32") {
+      assert.equal(config.inbounds[0].interface_name, "vizoguard");
+    }
   });
 
   it("includes server IP bypass route rule", () => {
