@@ -5,6 +5,7 @@
 - Cross-platform: `src/platform/` — darwin.js, win32.js, index.js (auto-selects)
 - Core modules: `src/core/` — threat-checker, immune-system, connection-monitor, proxy (barrel export: `src/core/index.js`)
 - VPN client: `src/vpn.js` — Shadowsocks/Outline protocol via `ss://` URLs
+- Transport layer: `src/connection-manager.js` (auto/direct/obfuscated mode selection), `src/transports/direct.js` (SS+tun2socks), `src/transports/obfuscated.js` (sing-box VLESS+WS+TLS)
 - License management: `src/license.js`
 - Auto-updater: `src/updater.js` — GitHub Releases feed (HTTPS)
 - API client: `src/api.js` — all backend calls, base URL: `https://vizoguard.com/api`, exponential backoff retry (2 retries, 1s/2s for 5xx/network errors)
@@ -101,8 +102,9 @@ Apps will show:
 - `app:openExternal`, `app:minimize`, `app:close` — window controls
 
 ## Testing
-- Framework: jest (`npm test` for full suite, `npx jest test/core/<module>.test.js` for single module)
-- Test files: `test/core/` — mirrors `src/core/` structure
+- Core tests: `test/core/` — mirrors `src/core/` structure, uses jest (`npx jest test/core/<module>.test.js`)
+- Transport/route/DNS tests: `test/*.test.js` — uses Node built-in test runner (`node --test test/*.test.js`)
+- Electron mock: tests needing `require("electron")` use `Module._resolveFilename` override (`mock.module` needs Node 22+, we're on 20)
 - Hook: editing `src/core/*.js` auto-runs the matching test file
 
 ## Gotchas
@@ -129,6 +131,11 @@ Apps will show:
 - `proxyReq.on("error")` must check `res.headersSent` before writing 502 — partial upstream response triggers double-header crash
 - CONNECT tunnel `serverSocket` is tracked in `_sockets` Set for clean shutdown — without this, outbound connections leak on stop()
 - SOCKS server post-connect crash auto-calls `disconnect()` — prevents broken network state where system proxy points at dead port
+- sing-box `auto_detect_interface` is unreliable — always add explicit server IP bypass route rules + private network bypass in config
+- sing-box `auto_route` may not clean up on SIGKILL/crash — `_ensureRouteRestored()` verifies and fixes OS routes after stop
+- Windows `Start-Process -RedirectStandardOutput` and `-RedirectStandardError` cannot point to the same file — use separate `.log` and `.err` files
+- Obfuscated transport must resolve VLESS server DNS before launching sing-box — DNS queries get trapped by TUN once `auto_route` is active
+- `connection-manager.js` `emergencyStop()` kills both transports but only direct has route rollback via `vpn._rollback()` — obfuscated has its own `_ensureRouteRestored()`
 
 ## Immune System v2 (Planned)
 - Design spec: `docs/superpowers/specs/2026-03-19-immune-system-layers-design.md`
