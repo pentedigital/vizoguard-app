@@ -320,33 +320,6 @@ ipcMain.handle("vpn:status", () => {
   return { connected: connectionManager.isConnected, state: vpn.state, mode: connectionManager.activeMode };
 });
 
-ipcMain.handle("vpn:getKey", async () => {
-  const cached = license.getCached();
-  if (cached && cached.vpnAccessUrl) return { access_url: cached.vpnAccessUrl };
-
-  try {
-    const key = store.get("license.key");
-    const deviceId = store.get("license.deviceId");
-
-    // Try /vpn/get first (retrieves existing key with device verification)
-    try {
-      const result = await apiCall("/vpn/get", { key, device_id: deviceId });
-      store.set("license.vpnAccessUrl", result.access_url);
-      return result;
-    } catch (getErr) {
-      // 404 = no key provisioned yet, fall through to create
-      if (getErr.httpStatus !== 404) throw getErr;
-    }
-
-    // Create a new key
-    const result = await apiCall("/vpn/create", { key, device_id: deviceId });
-    store.set("license.vpnAccessUrl", result.access_url);
-    return result;
-  } catch (err) {
-    return { error: err.error || "Could not fetch VPN key" };
-  }
-});
-
 ipcMain.handle("vpn:copyKey", () => {
   const vpnUrl = store.get("license.vpnAccessUrl");
   if (vpnUrl) {
@@ -547,7 +520,7 @@ ipcMain.handle("app:showDashboard", async () => {
   showPage("dashboard.html");
   updateMenu(true, trayCallbacks);
   license.startPeriodicCheck();
-  await startSecurityEngine();
+  startSecurityEngine().catch(() => {}); // Non-blocking — never delays UI or VPN
 });
 
 // ── Security Engine Start ─────────────────────
@@ -598,6 +571,9 @@ process.on('uncaughtException', (err) => {
   try { vpn._rollback().catch(() => {}); } catch {}
   sendToRenderer("vpn:error", { message: err.message || "Unexpected error" });
   sendToRenderer("vpn:state", { connected: false });
+  // Node.js docs: process is in undefined state after uncaughtException.
+  // Give renderer 2s to receive the error state, then exit.
+  setTimeout(() => process.exit(1), 2000);
 });
 
 process.on('unhandledRejection', (reason) => {
@@ -634,12 +610,15 @@ app.whenReady().then(async () => {
   license.validate().then(async (result) => {
     if (result.valid) {
       license.startPeriodicCheck();
-      await startSecurityEngine();
       updateMenu(true, trayCallbacks);
 
-      // Auto-connect if setting is enabled
+      // VPN first, security after — tunnel must establish before filtering starts
       if (store.get('autoConnect')) {
-        connectionManager.connect().catch(() => {});
+        connectionManager.connect()
+          .then(() => startSecurityEngine())
+          .catch(() => startSecurityEngine());
+      } else {
+        startSecurityEngine().catch(() => {});
       }
 
       // Check for updates silently

@@ -4,6 +4,17 @@ const execFileAsync = promisify(execFile);
 const { elevatedExec } = require("./elevation");
 
 const TUNNEL_DNS = ["9.9.9.9", "1.1.1.1"];
+const STRICT_IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/;
+const SAFE_SERVICE_NAME = /^[A-Za-z0-9 _\-().]+$/;
+
+function assertIp(value, label) {
+  if (!STRICT_IPV4.test(value)) throw new Error(`Invalid ${label}: ${value}`);
+  if (value.split(".").map(Number).some(o => o > 255)) throw new Error(`Invalid ${label}: octet out of range`);
+}
+
+function assertServiceName(value) {
+  if (!value || !SAFE_SERVICE_NAME.test(value)) throw new Error(`Invalid service name: ${value}`);
+}
 
 class Dns {
   constructor() {
@@ -108,14 +119,17 @@ class Dns {
   }
 
   async _applyDarwin() {
+    assertServiceName(this._service);
     await elevatedExec(`/usr/sbin/networksetup -setdnsservers "${this._service}" ${TUNNEL_DNS.join(" ")}`);
     console.log(`DNS set to ${TUNNEL_DNS.join(", ")} on ${this._service}`);
   }
 
   async _restoreDarwin() {
     if (!this._service) return;
+    assertServiceName(this._service);
 
     if (this._originalServers && this._originalServers.length > 0) {
+      this._originalServers.forEach(s => assertIp(s, "originalDnsServer"));
       await elevatedExec(`/usr/sbin/networksetup -setdnsservers "${this._service}" ${this._originalServers.join(" ")}`);
     } else {
       // Restore to DHCP DNS (empty = automatic)
@@ -168,6 +182,7 @@ class Dns {
 
   async _disableIpv6Darwin() {
     if (!this._service) return;
+    assertServiceName(this._service);
     try {
       await elevatedExec(`/usr/sbin/networksetup -setv6off "${this._service}"`);
       this._ipv6Disabled = true;
@@ -179,6 +194,7 @@ class Dns {
 
   async _restoreIpv6Darwin() {
     if (!this._service || !this._ipv6Disabled) return;
+    assertServiceName(this._service);
     try {
       await elevatedExec(`/usr/sbin/networksetup -setv6automatic "${this._service}"`);
       console.log(`IPv6 restored on ${this._service}`);

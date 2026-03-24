@@ -3,6 +3,18 @@ const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
 const { elevatedExec } = require("./elevation");
 
+const STRICT_IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/;
+
+function assertIp(value, label) {
+  if (!STRICT_IPV4.test(value)) {
+    throw new Error(`Invalid ${label}: ${value}`);
+  }
+  const octets = value.split(".").map(Number);
+  if (octets.some(o => o > 255)) {
+    throw new Error(`Invalid ${label}: octet out of range`);
+  }
+}
+
 class Routes {
   constructor() {
     this._originalGateway = null;
@@ -97,6 +109,10 @@ class Routes {
   }
 
   async _applyDarwin(tunGateway, vpnServerIp) {
+    assertIp(tunGateway, "tunGateway");
+    assertIp(vpnServerIp, "vpnServerIp");
+    assertIp(this._originalGateway, "originalGateway");
+
     // 1. Preserve route to VPN server through original gateway
     await elevatedExec(`/sbin/route add -host ${vpnServerIp} ${this._originalGateway}`);
 
@@ -108,12 +124,15 @@ class Routes {
   }
 
   async _restoreDarwin() {
+    assertIp(this._originalGateway, "originalGateway");
+
     // 1. Restore original default route (must happen before tun2socks dies)
     await elevatedExec(`/sbin/route delete default`).catch(() => {});
     await elevatedExec(`/sbin/route add default ${this._originalGateway}`);
 
     // 2. Remove VPN server host route
     if (this._vpnServerIp) {
+      assertIp(this._vpnServerIp, "vpnServerIp");
       await elevatedExec(`/sbin/route delete -host ${this._vpnServerIp}`).catch(() => {});
     }
 
@@ -145,6 +164,10 @@ class Routes {
   }
 
   async _applyWin32(tunGateway, vpnServerIp) {
+    assertIp(tunGateway, "tunGateway");
+    assertIp(vpnServerIp, "vpnServerIp");
+    assertIp(this._originalGateway, "originalGateway");
+
     // 1. Preserve route to VPN server through original gateway
     await elevatedExec(`route add ${vpnServerIp} mask 255.255.255.255 ${this._originalGateway}`);
 
@@ -160,6 +183,7 @@ class Routes {
 
     // 2. Remove VPN server host route
     if (this._vpnServerIp) {
+      assertIp(this._vpnServerIp, "vpnServerIp");
       await elevatedExec(`route delete ${this._vpnServerIp}`).catch(() => {});
     }
 
