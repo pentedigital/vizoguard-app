@@ -19,13 +19,16 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 // Resilient store — recover from corrupted JSON (#25)
+// encryptionKey obfuscates on-disk data (not cryptographic security — OS file
+// permissions are the real guard; this prevents casual inspection of credentials)
+const STORE_KEY = "vg-" + app.getName() + "-" + app.getVersion().split(".")[0];
 let store;
 try {
-  store = new Store();
+  store = new Store({ encryptionKey: STORE_KEY });
 } catch (e) {
   console.error("Store corrupted, resetting:", e.message);
   try { fs.unlinkSync(path.join(app.getPath("userData"), "config.json")); } catch {}
-  store = new Store();
+  store = new Store({ encryptionKey: STORE_KEY });
 }
 const license = new LicenseManager(store);
 
