@@ -6,9 +6,10 @@ const path = require("path");
 const CHECK_INTERVAL = 15000; // 15 seconds
 
 class ImmuneSystem extends EventEmitter {
-  constructor(appDir) {
+  constructor(appDir, isPackaged) {
     super();
     this.appDir = appDir;
+    this._isPackaged = !!isPackaged;
     this._timer = null;
     this._hashes = new Map(); // filepath -> sha256
     this._protectedFiles = [];
@@ -44,6 +45,17 @@ class ImmuneSystem extends EventEmitter {
   }
 
   _findProtectedFiles() {
+    // In packaged builds, JS files live inside app.asar — hash the archive itself
+    if (this._isPackaged) {
+      const asarPath = path.join(this.appDir, "resources", "app.asar");
+      if (fs.existsSync(asarPath)) return [asarPath];
+      // Fallback: some builds use app.asar.unpacked or different structure
+      const altPath = path.join(this.appDir, "resources", "app");
+      if (fs.existsSync(altPath)) return [altPath];
+      return [];
+    }
+
+    // Dev mode: monitor individual source files
     const files = [];
     const dirs = [
       this.appDir,

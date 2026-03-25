@@ -42,7 +42,13 @@ const LOG_TAIL_LINES = 30;
 const TEST_SERVER_IPS = ["1.2.3.4"];
 
 function makeTransport() {
-  return new ObfuscatedTransport();
+  const mockStore = {
+    _data: { "license.vlessUuid": "test-uuid-1234-5678-abcd-ef0123456789" },
+    get(key) { return this._data[key]; },
+    set(key, val) { this._data[key] = val; },
+    delete(key) { delete this._data[key]; },
+  };
+  return new ObfuscatedTransport(mockStore);
 }
 
 function validConfig(overrides) {

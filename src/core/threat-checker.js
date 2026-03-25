@@ -106,20 +106,19 @@ class ThreatChecker extends EventEmitter {
     }
 
     // 3. Brand impersonation
+    // Extract the registrable domain (e.g., "secure-amazon.com" → "secure-amazon")
+    const parts = hostname.split(".");
+    const sld = parts.length >= 2 ? parts[parts.length - 2] : "";
     for (const brand of this._brandNames) {
-      if (hostname.includes(brand)) {
-        // Allow legitimate domains: brand.com, *.brand.com, and known secondary TLDs
-        const legit = hostname === `${brand}.com` || hostname === `www.${brand}.com`
-          || hostname.endsWith(`.${brand}.com`) || hostname.endsWith(`.${brand}.net`)
-          || hostname.endsWith(`.${brand}.org`) || hostname.endsWith(`.${brand}.io`)
-          || hostname.endsWith(`${brand}apis.com`) || hostname.endsWith(`${brand}cdn.com`)
-          || hostname.endsWith(`${brand}cdn.net`) || hostname.endsWith(`${brand}online.com`)
-          || hostname.endsWith(`${brand}content.com`) || hostname.endsWith(`${brand}objects.com`);
-        if (!legit) {
-          checks.push({ name: "brand_impersonation", risk: "high", detail: `Possible ${brand} impersonation` });
-          break;
-        }
+      if (!hostname.includes(brand)) continue;
+      // Legitimate: the SLD starts with the brand name (amazon.com, amazonaws.com, amazoncdn.net)
+      // or is a subdomain of a brand-owned domain (maps.google.com, api.paypal.com)
+      if (sld.startsWith(brand) || (parts.length >= 3 && parts[parts.length - 2] === brand)) {
+        continue; // Brand-owned domain
       }
+      // Brand name embedded elsewhere (e.g., "secure-amazon-login.com", "paypa1-verify.net")
+      checks.push({ name: "brand_impersonation", risk: "high", detail: `Possible ${brand} impersonation` });
+      break;
     }
 
     // 4. IP address in URL

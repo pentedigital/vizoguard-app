@@ -104,6 +104,7 @@ class LicenseManager {
       // Clear stale VPN URL on status recovery
       if ((previousStatus === "suspended" || previousStatus === "expired") && result.status === "active") {
         this.store.delete("license.vpnAccessUrl");
+        this.store.delete("license.vlessUuid");
       }
       this.store.set("license.lastSuccessfulCheck", new Date().toISOString());
 
@@ -116,6 +117,7 @@ class LicenseManager {
           // 403 = revoked/mismatch — clear stale key (#23)
           if (vpnErr.httpStatus === 403) {
             this.store.delete("license.vpnAccessUrl");
+        this.store.delete("license.vlessUuid");
           }
           // 404 = not provisioned yet — ignore
         }
@@ -128,6 +130,7 @@ class LicenseManager {
       if (err.httpStatus === 403 && err.status === "expired") {
         this.store.set("license.status", "expired");
         this.store.delete("license.vpnAccessUrl");
+        this.store.delete("license.vlessUuid");
         this._emit({ valid: false, reason: "expired" });
         return { valid: false, reason: "expired" };
       }
@@ -135,6 +138,7 @@ class LicenseManager {
       if (err.httpStatus === 403 && err.status === "suspended") {
         this.store.set("license.status", "suspended");
         this.store.delete("license.vpnAccessUrl");
+        this.store.delete("license.vlessUuid");
         this._emit({ valid: false, reason: "suspended" });
         return { valid: false, reason: "suspended" };
       }
@@ -180,7 +184,7 @@ class LicenseManager {
   }
 
   startPeriodicCheck() {
-    this.stopPeriodicCheck();
+    if (this._timer) return; // Already running — don't reset the timer
     this._timer = setInterval(() => this.validate(), CHECK_INTERVAL_MS);
   }
 

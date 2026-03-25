@@ -486,17 +486,34 @@ class VpnManager extends EventEmitter {
     client.on('close', () => this._sockets.delete(client));
     client.on('error', () => client.destroy());
 
-    // SOCKS5 handshake
-    client.once("data", (data) => {
-      if (data[0] !== 0x05) {
-        client.end();
-        return;
+    // SOCKS5 handshake — buffered state machine handles pipelined data
+    let state = 0; // 0 = greeting, 1 = request
+    let buf = Buffer.alloc(0);
+    const onData = (chunk) => {
+      buf = buf.length ? Buffer.concat([buf, chunk]) : chunk;
+
+      if (state === 0) {
+        // Need at least 2 bytes: VER + NMETHODS
+        if (buf.length < 2) return;
+        if (buf[0] !== 0x05) { client.end(); return; }
+        const nMethods = buf[1];
+        const greetingLen = 2 + nMethods;
+        if (buf.length < greetingLen) return;
+
+        // Consume greeting, keep remainder
+        buf = buf.slice(greetingLen);
+        state = 1;
+        client.write(Buffer.from([0x05, 0x00]));
+
+        // Fall through to process any remaining data in buf
+        if (buf.length === 0) return;
       }
 
-      // No auth required
-      client.write(Buffer.from([0x05, 0x00]));
+      if (state === 1) {
+        // Need at least 4 bytes: VER + CMD + RSV + ATYP
+        if (buf.length < 4) return;
+        const request = buf;
 
-      client.once("data", (request) => {
         if (request[0] !== 0x05 || request[1] !== 0x01) {
           client.write(Buffer.from([0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
           client.end();
@@ -508,19 +525,17 @@ class VpnManager extends EventEmitter {
         const addrType = request[3];
 
         if (addrType === 0x01) {
-          // IPv4 — need at least 10 bytes
-          if (request.length < 10) { client.end(); return; }
+          if (request.length < 10) return; // Need more data
           destHost = `${request[4]}.${request[5]}.${request[6]}.${request[7]}`;
           destPort = request.readUInt16BE(8);
         } else if (addrType === 0x03) {
-          // Domain — need at least 5 + domainLen + 2 bytes
+          if (request.length < 5) return;
           const domainLen = request[4];
-          if (request.length < 5 + domainLen + 2) { client.end(); return; }
+          if (request.length < 5 + domainLen + 2) return; // Need more data
           destHost = request.slice(5, 5 + domainLen).toString();
           destPort = request.readUInt16BE(5 + domainLen);
         } else if (addrType === 0x04) {
-          // IPv6 — need at least 22 bytes
-          if (request.length < 22) { client.end(); return; }
+          if (request.length < 22) return; // Need more data
           const groups = [];
           for (let i = 4; i < 20; i += 2) {
             groups.push(((request[i] << 8) | request[i + 1]).toString(16));
@@ -532,13 +547,13 @@ class VpnManager extends EventEmitter {
           return;
         }
 
-        // Pause client to avoid dropping data between handshake and tunnel setup
+        // Done with handshake — remove listener and pause
+        client.removeListener("data", onData);
         client.pause();
-
-        // Connect through the Shadowsocks server
         this._tunnelConnection(client, destHost, destPort);
-      });
-    });
+      }
+    };
+    client.on("data", onData);
   }
 
   _tunnelConnection(client, destHost, destPort) {

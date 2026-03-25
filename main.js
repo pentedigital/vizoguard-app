@@ -41,10 +41,10 @@ if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 const threatChecker = new ThreatChecker(dataDir);
 const connectionMonitor = new ConnectionMonitor();
 const securityProxy = new SecurityProxy(threatChecker);
-const immuneSystem = new ImmuneSystem(app.isPackaged ? path.dirname(app.getPath("exe")) : __dirname);
+const immuneSystem = new ImmuneSystem(app.isPackaged ? path.dirname(app.getPath("exe")) : __dirname, app.isPackaged);
 const vpn = new VpnManager(store);
 const directTransport = new DirectTransport(vpn);
-const obfuscatedTransport = new ObfuscatedTransport();
+const obfuscatedTransport = new ObfuscatedTransport(store);
 const connectionManager = new ConnectionManager(directTransport, obfuscatedTransport, store);
 const updater = new Updater();
 
@@ -104,11 +104,23 @@ function sendToRenderer(channel, data) {
 
 // ── Tray ──────────────────────────────────────
 
+// Write sensitive text to clipboard and auto-clear after 30 seconds
+let _clipboardClearTimer = null;
+function clipboardWriteSensitive(text) {
+  clipboard.writeText(text);
+  if (_clipboardClearTimer) clearTimeout(_clipboardClearTimer);
+  _clipboardClearTimer = setTimeout(() => {
+    // Only clear if clipboard still contains our text
+    try { if (clipboard.readText() === text) clipboard.writeText(""); } catch {}
+    _clipboardClearTimer = null;
+  }, 30000);
+}
+
 const trayCallbacks = {
   showDashboard: () => showPage("dashboard.html"),
   copyVpnKey: () => {
     const vpnUrl = store.get("license.vpnAccessUrl");
-    if (vpnUrl) clipboard.writeText(vpnUrl);
+    if (vpnUrl) clipboardWriteSensitive(vpnUrl);
   },
   quit: async () => {
     // Graceful shutdown
@@ -268,7 +280,10 @@ ipcMain.handle("license:transfer", async () => {
   }
 });
 
+let _vpnConnecting = false;
 ipcMain.handle("vpn:connect", async () => {
+  if (_vpnConnecting || connectionManager.isConnected) return { success: false, error: "Already connecting" };
+  _vpnConnecting = true;
   try {
     // Validate license with server before connecting
     const validation = await license.validate();
@@ -286,6 +301,16 @@ ipcMain.handle("vpn:connect", async () => {
       sendToRenderer("vpn:state", { connected: false });
       return { success: false, error: msg, code: validation.reason };
     }
+    // Provision VLESS UUID for obfuscated transport (idempotent — returns cached if exists)
+    try {
+      const cached = license.getCached();
+      if (cached && cached.key) {
+        await obfuscatedTransport.provisionUuid(cached.key, store.get("deviceId"));
+      }
+    } catch (e) {
+      console.log(`VLESS UUID provision skipped: ${e.message}`);
+    }
+
     await connectionManager.connect();
     if (!connectionManager.isConnected) {
       return { success: false, error: "Connection was cancelled" };
@@ -297,6 +322,8 @@ ipcMain.handle("vpn:connect", async () => {
     sendToRenderer("vpn:error", { message: safeMsg });
     sendToRenderer("vpn:state", { connected: false });
     return { success: false, error: safeMsg };
+  } finally {
+    _vpnConnecting = false;
   }
 });
 
@@ -328,7 +355,7 @@ ipcMain.handle("vpn:status", () => {
 ipcMain.handle("vpn:copyKey", () => {
   const vpnUrl = store.get("license.vpnAccessUrl");
   if (vpnUrl) {
-    clipboard.writeText(vpnUrl);
+    clipboardWriteSensitive(vpnUrl);
     return { success: true };
   }
   return { success: false, error: "No VPN key available" };

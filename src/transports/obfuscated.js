@@ -16,8 +16,6 @@ const { elevatedExec, elevatedBatch } = require("../elevation");
 // Safe shell escaping — wraps in single quotes, escapes embedded single quotes
 function shellEscape(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
 
-// VLESS UUID — shared transport credential (user auth is at license level)
-const VLESS_UUID = "f6cb19fc-7b10-4787-a63a-e41f64707534";
 const VLESS_SERVER = "vizoguard.com";
 const VLESS_PORT = 443;
 const WS_PATH = "/ws";
@@ -25,8 +23,9 @@ const HEALTH_INTERVAL = 3000;
 const LOG_TAIL_LINES = 30;
 
 class ObfuscatedTransport extends EventEmitter {
-  constructor() {
+  constructor(store) {
     super();
+    this._store = store;
     this._pid = null;
     this._healthTimer = null;
     this._running = false;
@@ -40,6 +39,22 @@ class ObfuscatedTransport extends EventEmitter {
 
   get name() {
     return "obfuscated";
+  }
+
+  _getVlessUuid() {
+    const uuid = this._store.get("license.vlessUuid");
+    if (!uuid) throw new Error("VLESS UUID not provisioned — call provisionUuid() first");
+    return uuid;
+  }
+
+  // Fetch per-device VLESS UUID from server and cache in store
+  async provisionUuid(key, deviceId) {
+    const existing = this._store.get("license.vlessUuid");
+    if (existing) return existing;
+    const { apiCall } = require("../api");
+    const result = await apiCall("/vpn/vless", { key, device_id: deviceId });
+    this._store.set("license.vlessUuid", result.uuid);
+    return result.uuid;
   }
 
   _getBinaryPath() {
@@ -257,7 +272,7 @@ class ObfuscatedTransport extends EventEmitter {
         tag: "proxy",
         server: VLESS_SERVER,
         server_port: VLESS_PORT,
-        uuid: VLESS_UUID,
+        uuid: this._getVlessUuid(),
         tls: {
           enabled: true,
           server_name: VLESS_SERVER
