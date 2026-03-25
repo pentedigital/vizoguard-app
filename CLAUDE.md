@@ -35,6 +35,8 @@
 
 ## Architectural Rules
 - `vpn:connect` IPC validates license with server before every connection — cached state never trusted
+- `vpn:connect` has `_vpnConnecting` guard to prevent double-connect race during license.validate()
+- VLESS UUID provisioned per-device from `/api/vpn/vless` — stored in electron-store, cleared on revocation (not hardcoded)
 - VPN access URL cleared from electron-store on suspension/expiry and re-fetched on recovery
 - Tray and dashboard default to "Checking..." not "Protected" — state driven by validation, never defaults
 - `ss://` credential URL stripped from `license:status` IPC response — never exposed to renderer
@@ -50,6 +52,7 @@
 - Context isolation enforced — all renderer communication via preload.js IPC bridge
 - IPC event listeners cleaned up on page load (`removeAllListeners` before `on`) to prevent accumulation
 - VPN access URLs contain auth credentials — never log or expose
+- Clipboard auto-clears ss:// URLs after 30 seconds (`clipboardWriteSensitive` in main.js)
 - `openExternal` restricted to vizoguard.com, getoutline.org, and exact `mailto:support@vizoguard.com`
 - CONNECT tunnel port-whitelisted to 80/443 only — loopback/private IPs blocked to prevent SSRF
 - VPN host validated on connect — rejects loopback/private IP ranges
@@ -111,6 +114,9 @@ Apps will show:
 - User-Agent in `src/api.js` is hardcoded (`Vizoguard/X.X.X`) — must match version in `package.json` on every bump
 - Desktop UI loads fonts from `fonts.gstatic.com` via `@font-face` in `ui/assets/style.css` (Outfit + JetBrains Mono) — CSP allows this in all HTML files
 - Blocklist file at `{userData}/data/malicious-domains.txt` — loaded once at startup, never auto-updated
+- Immune system hashes `app.asar` in production builds (not individual JS files — they don't exist outside the archive)
+- SOCKS5 handshake uses buffered state machine (not `once("data")`) to handle pipelined TCP segments
+- `startPeriodicCheck()` no-ops if timer already running — prevents reset on dashboard navigation
 - SOCKS5 VPN tunnel uses Shadowsocks AEAD encryption (chacha20-ietf-poly1305) — implemented in `src/vpn.js` with Node.js crypto. Supports aes-256-gcm and aes-128-gcm as well.
 - Grace period: 7 days offline tolerance before license shows expired
 - Single-instance lock: `app.requestSingleInstanceLock()` in `main.js` — second launch quits immediately and focuses existing window
