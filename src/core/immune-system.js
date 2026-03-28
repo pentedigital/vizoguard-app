@@ -3,25 +3,24 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
-const CHECK_INTERVAL = 15000; // 15 seconds
+const DEBOUNCE_MS = 1000; // Wait 1s after last change before re-hashing
 
 class ImmuneSystem extends EventEmitter {
   constructor(appDir, isPackaged) {
     super();
     this.appDir = appDir;
     this._isPackaged = !!isPackaged;
-    this._timer = null;
+    this._watchers = [];
     this._hashes = new Map(); // filepath -> sha256
     this._protectedFiles = [];
-    this._alerted = new Set(); // Track already-alerted files to prevent infinite toasts
+    this._alerted = new Set();
+    this._debounceTimers = new Map(); // filepath -> timer
     this.events = [];
   }
 
   start() {
-    // Clear any existing timer to prevent leaks on repeated start()
     this.stop();
 
-    // Build list of protected files
     this._protectedFiles = this._findProtectedFiles();
 
     // Take initial snapshot
@@ -32,30 +31,112 @@ class ImmuneSystem extends EventEmitter {
 
     console.log(`Immune system protecting ${this._protectedFiles.length} files`);
 
-    // Start monitoring
-    this._timer = setInterval(() => this._check(), CHECK_INTERVAL);
+    // Watch files/directories for changes
+    this._startWatching();
     this.emit("started", { files: this._protectedFiles.length });
   }
 
   stop() {
-    if (this._timer) {
-      clearInterval(this._timer);
-      this._timer = null;
+    for (const w of this._watchers) {
+      try { w.close(); } catch { /* already closed */ }
+    }
+    this._watchers = [];
+    for (const timer of this._debounceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this._debounceTimers.clear();
+  }
+
+  _startWatching() {
+    if (this._isPackaged) {
+      // Production: watch the single asar/app file
+      for (const file of this._protectedFiles) {
+        this._watchFile(file);
+      }
+    } else {
+      // Dev mode: watch directories containing protected files
+      const dirs = new Set();
+      for (const file of this._protectedFiles) {
+        dirs.add(path.dirname(file));
+      }
+      for (const dir of dirs) {
+        this._watchDir(dir);
+      }
     }
   }
 
+  _watchFile(filepath) {
+    try {
+      const watcher = fs.watch(filepath, () => {
+        this._scheduleCheck(filepath);
+      });
+      watcher.on("error", () => { /* file may be deleted — handled in _checkFile */ });
+      this._watchers.push(watcher);
+    } catch {
+      // File doesn't exist or can't be watched — skip
+    }
+  }
+
+  _watchDir(dir) {
+    try {
+      const watcher = fs.watch(dir, (eventType, filename) => {
+        if (!filename) return;
+        const fullPath = path.join(dir, filename);
+        if (this._hashes.has(fullPath)) {
+          this._scheduleCheck(fullPath);
+        }
+      });
+      watcher.on("error", () => { /* directory may be deleted */ });
+      this._watchers.push(watcher);
+    } catch {
+      // Directory doesn't exist or can't be watched — skip
+    }
+  }
+
+  _scheduleCheck(filepath) {
+    // Debounce: reset timer on each change event
+    const existing = this._debounceTimers.get(filepath);
+    if (existing) clearTimeout(existing);
+
+    this._debounceTimers.set(filepath, setTimeout(() => {
+      this._debounceTimers.delete(filepath);
+      this._checkFile(filepath);
+    }, DEBOUNCE_MS));
+  }
+
+  _checkFile(filepath) {
+    const currentHash = this._hashFile(filepath);
+    const storedHash = this._hashes.get(filepath);
+
+    if (!currentHash) {
+      if (!this._alerted.has(filepath)) {
+        this._alerted.add(filepath);
+        const event = { type: "deleted", file: path.basename(filepath), time: new Date().toISOString() };
+        this.events.push(event);
+        this.emit("alert", event);
+      }
+      return;
+    }
+
+    if (storedHash && currentHash !== storedHash && !this._alerted.has(filepath)) {
+      this._alerted.add(filepath);
+      const event = { type: "modified", file: path.basename(filepath), time: new Date().toISOString() };
+      this.events.push(event);
+      this.emit("alert", event);
+    }
+
+    if (this.events.length > 100) this.events = this.events.slice(-100);
+  }
+
   _findProtectedFiles() {
-    // In packaged builds, JS files live inside app.asar — hash the archive itself
     if (this._isPackaged) {
       const asarPath = path.join(this.appDir, "resources", "app.asar");
       if (fs.existsSync(asarPath)) return [asarPath];
-      // Fallback: some builds use app.asar.unpacked or different structure
       const altPath = path.join(this.appDir, "resources", "app");
       if (fs.existsSync(altPath)) return [altPath];
       return [];
     }
 
-    // Dev mode: monitor individual source files
     const files = [];
     const dirs = [
       this.appDir,
@@ -86,35 +167,6 @@ class ImmuneSystem extends EventEmitter {
     } catch {
       return null;
     }
-  }
-
-  _check() {
-    for (const file of this._protectedFiles) {
-      const currentHash = this._hashFile(file);
-      const storedHash = this._hashes.get(file);
-
-      if (!currentHash) {
-        // File was deleted — alert once per session per file
-        if (!this._alerted.has(file)) {
-          this._alerted.add(file);
-          const event = { type: "deleted", file: path.basename(file), time: new Date().toISOString() };
-          this.events.push(event);
-          this.emit("alert", event);
-        }
-        continue;
-      }
-
-      if (storedHash && currentHash !== storedHash && !this._alerted.has(file)) {
-        this._alerted.add(file);
-        // File was modified — alert once per session per file
-        const event = { type: "modified", file: path.basename(file), time: new Date().toISOString() };
-        this.events.push(event);
-        this.emit("alert", event);
-      }
-    }
-
-    // Cap events array to prevent unbounded memory growth (applies to all event types)
-    if (this.events.length > 100) this.events = this.events.slice(-100);
   }
 }
 
