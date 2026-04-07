@@ -111,7 +111,7 @@ Apps will show:
 - Critical path tests: `test/license.test.js` (29 tests), `test/api.test.js` (12 tests), `test/threat-checker.test.js` (24 tests), `test/connection-manager.test.js` (15 tests)
 - Electron mock: tests needing `require("electron")` use `Module._resolveFilename` override (`mock.module` needs Node 22+, we're on 20)
 - API mock: `test/api.test.js` monkey-patches `https.request` on the singleton; uses `mock.timers.enable()` for retry delay tests
-- License mock: `test/license.test.js` uses `require.cache` injection for apiCall + platform.getDeviceId
+- License mock: `test/license.test.js` uses `require.cache` injection for apiCall + platform.getDeviceId — apiCall mock MUST use a delegating wrapper (`async (...args) => mockApiCall(...args)`) because license.js destructures at require time
 - Hook: editing `src/core/*.js` auto-runs the matching test file
 
 ## Gotchas
