@@ -105,9 +105,13 @@ Apps will show:
 - `app:openExternal`, `app:minimize`, `app:close` — window controls
 
 ## Testing
+- Run all: `node --test test/*.test.js` — 140 tests, Node built-in test runner
 - Core tests: `test/core/` — mirrors `src/core/` structure, uses jest (`npx jest test/core/<module>.test.js`)
-- Transport/route/DNS tests: `test/*.test.js` — uses Node built-in test runner (`node --test test/*.test.js`)
+- Transport/route/DNS tests: `test/*.test.js` — dns, routes, obfuscated transport
+- Critical path tests: `test/license.test.js` (29 tests), `test/api.test.js` (12 tests), `test/threat-checker.test.js` (24 tests), `test/connection-manager.test.js` (15 tests)
 - Electron mock: tests needing `require("electron")` use `Module._resolveFilename` override (`mock.module` needs Node 22+, we're on 20)
+- API mock: `test/api.test.js` monkey-patches `https.request` on the singleton; uses `mock.timers.enable()` for retry delay tests
+- License mock: `test/license.test.js` uses `require.cache` injection for apiCall + platform.getDeviceId
 - Hook: editing `src/core/*.js` auto-runs the matching test file
 
 ## Gotchas
