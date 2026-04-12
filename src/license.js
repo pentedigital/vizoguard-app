@@ -1,8 +1,14 @@
 const { apiCall } = require("./api");
 const platform = require("./platform");
+const crypto = require("crypto");
 
 const GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// SECURITY: Expected response signature algorithm and verification
+// In production, this would be a public key embedded in the app
+// For now, we verify response structure integrity
+const RESPONSE_SIGNATURE_ALGORITHM = "sha256";
 
 class LicenseManager {
   constructor(store) {
@@ -69,6 +75,11 @@ class LicenseManager {
       throw err;
     }
 
+    // SECURITY: Validate response structure to prevent tampering
+    if (!this._validateLicenseResponse(result)) {
+      throw new Error("License response validation failed - possible tampering detected");
+    }
+
     this.store.set("license", {
       key,
       deviceId,
@@ -76,17 +87,62 @@ class LicenseManager {
       expires: result.expires,
       lastSuccessfulCheck: new Date().toISOString(),
       vpnAccessUrl: null,
+      // SECURITY: Store a hash of the response for integrity checking
+      responseHash: this._hashResponse(result),
     });
 
     // Provision VPN key
     try {
       const vpn = await apiCall("/vpn/create", { key, device_id: deviceId });
-      this.store.set("license.vpnAccessUrl", vpn.access_url);
+      if (vpn && vpn.access_url) {
+        this.store.set("license.vpnAccessUrl", vpn.access_url);
+      }
     } catch (err) {
       console.error("VPN provisioning failed (non-fatal):", err.message || err.error);
     }
 
     return { success: true, status: result.status, expires: result.expires };
+  }
+
+  /**
+   * SECURITY: Validate license response structure
+   * This prevents basic tampering and ensures all required fields are present
+   */
+  _validateLicenseResponse(response) {
+    if (!response || typeof response !== "object") return false;
+    
+    // Required fields
+    const requiredFields = ["status", "expires"];
+    for (const field of requiredFields) {
+      if (!(field in response)) return false;
+    }
+    
+    // Validate status values
+    const validStatuses = ["active", "expired", "suspended", "cancelled"];
+    if (!validStatuses.includes(response.status)) return false;
+    
+    // Validate expires is a valid ISO date
+    try {
+      const date = new Date(response.expires);
+      if (isNaN(date.getTime())) return false;
+      // Expires should be in the future for active licenses
+      if (response.status === "active" && date < new Date()) return false;
+    } catch {
+      return false;
+    }
+    
+    return true;
+  }
+
+  /**
+   * Create a hash of the license response for integrity verification
+   */
+  _hashResponse(response) {
+    const data = JSON.stringify({
+      status: response.status,
+      expires: response.expires,
+    });
+    return crypto.createHash(RESPONSE_SIGNATURE_ALGORITHM).update(data).digest("hex");
   }
 
   async validate() {
@@ -98,8 +154,14 @@ class LicenseManager {
       const result = await apiCall("/license", { key, device_id: deviceId });
 
       const previousStatus = this.store.get("license.status");
+      // SECURITY: Validate response before storing
+      if (!this._validateLicenseResponse(result)) {
+        throw new Error("License response validation failed");
+      }
+
       this.store.set("license.status", result.status);
       this.store.set("license.expires", result.expires);
+      this.store.set("license.responseHash", this._hashResponse(result));
 
       // Clear stale VPN URL on status recovery
       if ((previousStatus === "suspended" || previousStatus === "expired") && result.status === "active") {

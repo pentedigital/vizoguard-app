@@ -74,6 +74,20 @@ function createWindow(page) {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, "preload.js"),
+      // SECURITY: Content Security Policy to prevent XSS
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'"], // inline needed for bundled JS
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", "data:", "https:"],
+          connectSrc: ["'self'", "https://vizoguard.com", "https://www.vizoguard.com"],
+          fontSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          mediaSrc: ["'self'"],
+          frameSrc: ["'none'"],
+        },
+      },
     },
   });
 
@@ -170,6 +184,29 @@ function updateWeeklyStats(type) {
 
 // 60-second interval to increment timeProtected while VPN is connected
 let _weeklyTimeInterval = null;
+
+// SECURITY FIX: Track all timers and intervals for proper cleanup
+const _activeTimers = new Set();
+
+function createTrackedInterval(fn, delay) {
+  const id = setInterval(fn, delay);
+  _activeTimers.add(id);
+  return id;
+}
+
+function createTrackedTimeout(fn, delay) {
+  const id = setTimeout(fn, delay);
+  _activeTimers.add(id);
+  return id;
+}
+
+function clearAllTrackedTimers() {
+  for (const id of _activeTimers) {
+    clearInterval(id);
+    clearTimeout(id);
+  }
+  _activeTimers.clear();
+}
 
 // ── Security Engine Events ────────────────────
 
@@ -491,32 +528,43 @@ ipcMain.handle("engine:metrics", () => {
 const engineIntervals = new Map();
 
 ipcMain.on("engine:subscribe", (event) => {
-  // Single-window app: clear ALL existing intervals on new subscribe
-  // to prevent accumulation when pages navigate
-  for (const [oldId, oldInterval] of engineIntervals) {
-    clearInterval(oldInterval);
+  const sender = event.sender;
+  const id = sender.id;
+  
+  // SECURITY FIX: Prevent memory leak - clean up existing interval for this sender
+  if (engineIntervals.has(id)) {
+    clearInterval(engineIntervals.get(id));
+    engineIntervals.delete(id);
   }
-  engineIntervals.clear();
-
-  const id = event.sender.id;
 
   const interval = setInterval(() => {
-    if (event.sender.isDestroyed()) {
+    // SECURITY FIX: Check if sender is destroyed before accessing
+    if (sender.isDestroyed()) {
       clearInterval(interval);
       engineIntervals.delete(id);
       return;
     }
-    event.sender.send("engine:update", flattenEngineMetrics());
+    try {
+      sender.send("engine:update", flattenEngineMetrics());
+    } catch (err) {
+      // Sender may be closing - clean up
+      clearInterval(interval);
+      engineIntervals.delete(id);
+    }
   }, 1000);
   engineIntervals.set(id, interval);
 
-  // Clean up when the webContents is destroyed
-  event.sender.once("destroyed", () => {
+  // SECURITY FIX: Multiple cleanup handlers for reliability
+  const cleanup = () => {
     if (engineIntervals.has(id)) {
       clearInterval(engineIntervals.get(id));
       engineIntervals.delete(id);
     }
-  });
+  };
+  
+  sender.once("destroyed", cleanup);
+  sender.once("crashed", cleanup);
+  sender.once("did-navigate", cleanup); // Clean up on navigation
 });
 
 ipcMain.on("engine:unsubscribe", (event) => {

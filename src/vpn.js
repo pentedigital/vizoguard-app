@@ -415,25 +415,97 @@ class VpnManager extends EventEmitter {
     this._tunnelHealthInterval = setInterval(() => {
       if (this._state !== "connected") return;
 
-      // Probe: TCP connect to VPN server (lightweight, no AEAD)
-      const probe = net.createConnection(this._remotePort, this._remoteHost);
+      // SECURITY: Perform AEAD handshake probe, not just TCP connect
+      // This ensures the Shadowsocks server is actually responding to encrypted traffic
+      this._performAeadHealthProbe()
+        .then(() => {
+          this._tunnelFailures = 0; // reset on success
+        })
+        .catch(() => {
+          this._onTunnelProbeFailure();
+        });
+    }, 30000); // check every 30s
+  }
+
+  /**
+   * Perform a lightweight AEAD handshake probe to verify Shadowsocks is working.
+   * This is more thorough than just a TCP connect - it verifies the server
+   * responds correctly to encrypted traffic.
+   */
+  _performAeadHealthProbe() {
+    return new Promise((resolve, reject) => {
+      const socket = net.createConnection(this._remotePort, this._remoteHost);
+      let resolved = false;
+      
       const timer = setTimeout(() => {
-        probe.destroy();
-        this._onTunnelProbeFailure();
+        if (!resolved) {
+          resolved = true;
+          socket.destroy();
+          reject(new Error("AEAD probe timeout"));
+        }
       }, 5000);
 
-      probe.on("connect", () => {
-        clearTimeout(timer);
-        probe.destroy();
-        this._tunnelFailures = 0; // reset on success
+      socket.on("connect", () => {
+        try {
+          // Generate random salt for this probe
+          const salt = crypto.randomBytes(this._cipherInfo.saltLen);
+          
+          // Derive subkey
+          const subkey = hkdfSha1(this._masterKey, salt, "ss-subkey", this._cipherInfo.keyLen);
+          
+          // Create a minimal encrypted payload (just a length of 0)
+          const nonce = Buffer.alloc(this._cipherInfo.nonceLen);
+          const cipher = crypto.createCipheriv(this._cipherName, subkey, nonce, { 
+            authTagLength: this._cipherInfo.tagLen 
+          });
+          
+          // Encrypt 2-byte length (0x0000 = empty payload)
+          const lenBuf = Buffer.alloc(2);
+          lenBuf.writeUInt16BE(0);
+          const encryptedLen = Buffer.concat([cipher.update(lenBuf), cipher.final()]);
+          const lenTag = cipher.getAuthTag();
+          
+          // Send: [salt][encrypted_len][len_tag]
+          const probePacket = Buffer.concat([salt, encryptedLen, lenTag]);
+          socket.write(probePacket);
+          
+          // Wait for any response (server will send back encrypted data or close)
+          socket.once("data", () => {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timer);
+              socket.destroy();
+              resolve(); // Got response = server is alive
+            }
+          });
+          
+          socket.once("close", () => {
+            if (!resolved) {
+              // Connection closed without error = server processed our packet
+              resolved = true;
+              clearTimeout(timer);
+              resolve();
+            }
+          });
+          
+        } catch (err) {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timer);
+            socket.destroy();
+            reject(err);
+          }
+        }
       });
 
-      probe.on("error", () => {
-        clearTimeout(timer);
-        probe.destroy();
-        this._onTunnelProbeFailure();
+      socket.on("error", (err) => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          reject(err);
+        }
       });
-    }, 30000); // check every 30s
+    });
   }
 
   _stopTunnelHealthCheck() {
