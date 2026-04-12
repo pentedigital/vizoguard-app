@@ -57,6 +57,13 @@
 - CONNECT tunnel port-whitelisted to 80/443 only — loopback/private IPs blocked to prevent SSRF
 - VPN host validated on connect — rejects loopback/private IP ranges
 
+## Security Improvements (2026-04-12)
+- **Code signature verification**: Auto-updater (`src/updater.js`) now verifies update signatures and prevents downgrade attacks via minimum version check
+- **CSP headers**: Strict Content Security Policy configured in BrowserWindow (`main.js`)
+- **Memory leak fixes**: Proper cleanup for engine intervals with multiple destroy handlers (`main.js`)
+- **License validation**: Response structure validation and integrity hashing (`src/license.js`)
+- **AEAD health probes**: Shadowsocks handshake verification (not just TCP connect) in `src/vpn.js` `_performAeadHealthProbe()`
+
 ## Commands
 - `npm install` — install dependencies
 - `npm start` — run in dev mode (see `package.json` scripts)
