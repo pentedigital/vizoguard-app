@@ -98,7 +98,8 @@ jobs:
   deploy:
     name: Deploy to VPS
     needs: [build-mac, build-win]
-    runs-on: ubuntu-latest
+    runs-on: vizoguard-vps
+    if: github.repository == 'pentedigital/vizoguard-app'
     steps:
       - name: Download mac artifact
         uses: actions/download-artifact@v4
@@ -115,66 +116,38 @@ jobs:
       - name: List built files
         run: ls -lh dist/
 
-      - name: Setup SSH key
-        env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
+      - name: Copy installers to downloads directory
         run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-
-          # Sanitize hostname: strip newlines, carriage returns, and spaces
-          HOST=$(printf '%s' "$VPS_HOST" | tr -d '\n\r ')
-          if [ -z "$HOST" ]; then
-            echo "Error: VPS_HOST secret is empty or invalid"
-            exit 1
-          fi
-          echo "Using host: $HOST"
-
-          # Write SSH config so we don't repeat flags on every command
-          cat > ~/.ssh/config <<EOF
-          Host vps
-            HostName $HOST
-            User root
-            IdentityFile ~/.ssh/deploy_key
-            StrictHostKeyChecking accept-new
-            UserKnownHostsFile ~/.ssh/known_hosts
-          EOF
-          chmod 600 ~/.ssh/config
-
-          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
-
-      - name: Upload installers to VPS
-        env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-        run: |
-          HOST=$(printf '%s' "$VPS_HOST" | tr -d '\n\r ')
           VERSION=$(grep '^version:' dist/latest.yml | awk '{print $2}')
-          echo "Deploying version: $VERSION to $HOST"
+          echo "Deploying version: $VERSION"
 
-          # Upload Mac DMGs (x64 + arm64 separately)
+          # Ensure downloads directory exists
+          mkdir -p /var/www/vizoguard/downloads/
+
+          # Copy Mac DMGs (x64 + arm64 separately)
           DMG_X64=$(ls dist/Vizoguard-${VERSION}.dmg 2>/dev/null || ls dist/*-${VERSION}.dmg 2>/dev/null | grep -v arm64 | head -1)
           DMG_ARM=$(ls dist/Vizoguard-${VERSION}-arm64.dmg 2>/dev/null || echo "")
           EXE=$(ls dist/*.exe | head -1)
 
           if [ -n "$DMG_X64" ]; then
-            rsync -avz --progress "$DMG_X64" "vps:/var/www/vizoguard/downloads/Vizoguard-${VERSION}.dmg"
+            cp "$DMG_X64" /var/www/vizoguard/downloads/Vizoguard-${VERSION}.dmg
           fi
 
           if [ -n "$DMG_ARM" ]; then
-            rsync -avz --progress "$DMG_ARM" "vps:/var/www/vizoguard/downloads/Vizoguard-${VERSION}-arm64.dmg"
+            cp "$DMG_ARM" /var/www/vizoguard/downloads/Vizoguard-${VERSION}-arm64.dmg
           fi
 
-          rsync -avz --progress "$EXE" "vps:/var/www/vizoguard/downloads/Vizoguard-Setup-${VERSION}.exe"
+          cp "$EXE" /var/www/vizoguard/downloads/Vizoguard-Setup-${VERSION}.exe
 
-          # Upload auto-update feeds
-          rsync -avz --progress dist/latest-mac.yml dist/latest.yml "vps:/var/www/vizoguard/downloads/"
+          # Copy auto-update feeds
+          cp dist/latest-mac.yml dist/latest.yml /var/www/vizoguard/downloads/
 
-          ssh vps "cd /var/www/vizoguard/downloads && \
-             cp Vizoguard-${VERSION}.dmg Vizoguard-latest.dmg && \
-             [ -f Vizoguard-${VERSION}-arm64.dmg ] && cp Vizoguard-${VERSION}-arm64.dmg Vizoguard-latest-arm64.dmg || true && \
-             cp Vizoguard-Setup-${VERSION}.exe Vizoguard-Setup-latest.exe && \
-             ls -lh"
+          # Update symlinks
+          ln -sf Vizoguard-${VERSION}.dmg /var/www/vizoguard/downloads/Vizoguard-latest.dmg
+          [ -f /var/www/vizoguard/downloads/Vizoguard-${VERSION}-arm64.dmg ] && ln -sf Vizoguard-${VERSION}-arm64.dmg /var/www/vizoguard/downloads/Vizoguard-latest-arm64.dmg || true
+          ln -sf Vizoguard-Setup-${VERSION}.exe /var/www/vizoguard/downloads/Vizoguard-Setup-latest.exe
+
+          ls -lh /var/www/vizoguard/downloads/
 
       - name: Notify success
         if: success()
