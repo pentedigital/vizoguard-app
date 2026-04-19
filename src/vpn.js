@@ -455,7 +455,7 @@ class VpnManager extends EventEmitter {
           
           // Create a minimal encrypted payload (just a length of 0)
           const nonce = Buffer.alloc(this._cipherInfo.nonceLen);
-          const cipher = crypto.createCipheriv(this._cipherName, subkey, nonce, { 
+          const cipher = crypto.createCipheriv(this._cipherInfo.cipher, subkey, nonce, { 
             authTagLength: this._cipherInfo.tagLen 
           });
           

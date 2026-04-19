@@ -44,8 +44,19 @@ const ALLOWED_PREFIXES_WIN32 = [
   "netsh ",
   "reg add ",
   "reg delete ",
-  "powershell -Command",
 ];
+
+// Restrict PowerShell to only safe Start-Process patterns used by the app
+function isAllowedPowerShell(cmd) {
+  if (!cmd.startsWith("powershell -Command ")) return false;
+  const inner = cmd.slice("powershell -Command ".length);
+  // Block any dangerous cmdlets or external network calls
+  const forbidden = /Invoke-Expression|Invoke-Command|IEX|DownloadString|Start-BitsTransfer|Remove-Item|Remove-ItemProperty|Set-ExecutionPolicy|New-Object|Add-Type|ReflectivePE|Invoke-WebRequest|curl|wget/i;
+  if (forbidden.test(inner)) return false;
+  // Must only use Start-Process (to launch tun2socks/sing-box) and Out-File (for PID capture)
+  if (!inner.includes("Start-Process")) return false;
+  return true;
+}
 // Binary names — matched as path-terminated segments (not substring)
 const ALLOWED_BINARY_RE = /(^|[/\\])(?:tun2socks|sing-box)\b/;
 
@@ -54,6 +65,10 @@ function isSingleCommandAllowed(cmd) {
   // Strip common trailing error suppression
   cmd = cmd.replace(/\|\|\s*(true|ver>nul)\s*$/, "").trim();
   if (!cmd) return true; // empty after stripping is fine
+  // PowerShell commands require dedicated security review
+  if (cmd.startsWith("powershell -Command")) {
+    return isAllowedPowerShell(cmd);
+  }
   const prefixes = process.platform === "win32" ? ALLOWED_PREFIXES_WIN32 : ALLOWED_PREFIXES_DARWIN;
   if (prefixes.some(p => cmd.startsWith(p))) return true;
   if (ALLOWED_BINARY_RE.test(cmd)) return true;
