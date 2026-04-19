@@ -116,16 +116,41 @@ jobs:
         run: ls -lh dist/
 
       - name: Setup SSH key
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+          # Sanitize hostname: strip newlines, carriage returns, and spaces
+          HOST=$(printf '%s' "$VPS_HOST" | tr -d '\n\r ')
+          if [ -z "$HOST" ]; then
+            echo "Error: VPS_HOST secret is empty or invalid"
+            exit 1
+          fi
+          echo "Using host: $HOST"
+
+          # Write SSH config so we don't repeat flags on every command
+          cat > ~/.ssh/config <<EOF
+          Host vps
+            HostName $HOST
+            User root
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking accept-new
+            UserKnownHostsFile ~/.ssh/known_hosts
+          EOF
+          chmod 600 ~/.ssh/config
+
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Upload installers to VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
         run: |
+          HOST=$(printf '%s' "$VPS_HOST" | tr -d '\n\r ')
           VERSION=$(grep '^version:' dist/latest.yml | awk '{print $2}')
-          echo "Deploying version: $VERSION"
+          echo "Deploying version: $VERSION to $HOST"
 
           # Upload Mac DMGs (x64 + arm64 separately)
           DMG_X64=$(ls dist/Vizoguard-${VERSION}.dmg 2>/dev/null || ls dist/*-${VERSION}.dmg 2>/dev/null | grep -v arm64 | head -1)
@@ -133,25 +158,19 @@ jobs:
           EXE=$(ls dist/*.exe | head -1)
 
           if [ -n "$DMG_X64" ]; then
-            scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
-              "$DMG_X64" root@${{ secrets.VPS_HOST }}:/var/www/vizoguard/downloads/Vizoguard-${VERSION}.dmg
+            rsync -avz --progress "$DMG_X64" "vps:/var/www/vizoguard/downloads/Vizoguard-${VERSION}.dmg"
           fi
 
           if [ -n "$DMG_ARM" ]; then
-            scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
-              "$DMG_ARM" root@${{ secrets.VPS_HOST }}:/var/www/vizoguard/downloads/Vizoguard-${VERSION}-arm64.dmg
+            rsync -avz --progress "$DMG_ARM" "vps:/var/www/vizoguard/downloads/Vizoguard-${VERSION}-arm64.dmg"
           fi
 
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
-            "$EXE" root@${{ secrets.VPS_HOST }}:/var/www/vizoguard/downloads/Vizoguard-Setup-${VERSION}.exe
+          rsync -avz --progress "$EXE" "vps:/var/www/vizoguard/downloads/Vizoguard-Setup-${VERSION}.exe"
 
           # Upload auto-update feeds
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
-            dist/latest-mac.yml dist/latest.yml \
-            root@${{ secrets.VPS_HOST }}:/var/www/vizoguard/downloads/
+          rsync -avz --progress dist/latest-mac.yml dist/latest.yml "vps:/var/www/vizoguard/downloads/"
 
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new root@${{ secrets.VPS_HOST }} \
-            "cd /var/www/vizoguard/downloads && \
+          ssh vps "cd /var/www/vizoguard/downloads && \
              cp Vizoguard-${VERSION}.dmg Vizoguard-latest.dmg && \
              [ -f Vizoguard-${VERSION}-arm64.dmg ] && cp Vizoguard-${VERSION}-arm64.dmg Vizoguard-latest-arm64.dmg || true && \
              cp Vizoguard-Setup-${VERSION}.exe Vizoguard-Setup-latest.exe && \
