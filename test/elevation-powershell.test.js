@@ -13,7 +13,9 @@ function extractFunction(name, source) {
 }
 
 const fnSrc = extractFunction("isAllowedPowerShell", src);
-eval(fnSrc); // defines isAllowedPowerShell globally
+// Define ALLOWED_BINARY_RE in the eval scope before the function
+const reMatch = src.match(/const ALLOWED_BINARY_RE = .+/);
+eval((reMatch ? reMatch[0] + ";" : "") + fnSrc);
 
 describe("Elevation daemon PowerShell restriction", () => {
   it("allows Start-Process commands used by the app", () => {

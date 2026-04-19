@@ -51,10 +51,16 @@ function isAllowedPowerShell(cmd) {
   if (!cmd.startsWith("powershell -Command ")) return false;
   const inner = cmd.slice("powershell -Command ".length);
   // Block any dangerous cmdlets or external network calls
-  const forbidden = /Invoke-Expression|Invoke-Command|IEX|DownloadString|Start-BitsTransfer|Remove-Item|Remove-ItemProperty|Set-ExecutionPolicy|New-Object|Add-Type|ReflectivePE|Invoke-WebRequest|curl|wget/i;
+  const forbidden = /\bInvoke-Expression\b|\bInvoke-Command\b|\bIEX\b|\bDownloadString\b|\bStart-BitsTransfer\b|\bRemove-Item\b|\bRemove-ItemProperty\b|\bSet-ExecutionPolicy\b|\bNew-Object\b|\bAdd-Type\b|\bReflectivePE\b|\bInvoke-WebRequest\b|\bcurl\b|\bwget\b/i;
   if (forbidden.test(inner)) return false;
   // Must only use Start-Process (to launch tun2socks/sing-box) and Out-File (for PID capture)
   if (!inner.includes("Start-Process")) return false;
+  // Extract the target binary from -FilePath and verify it matches allowed binaries
+  const filePathMatch = inner.match(/-FilePath\s+['"]([^'"]+)['"]/i);
+  if (filePathMatch) {
+    const target = filePathMatch[1];
+    if (!ALLOWED_BINARY_RE.test(target)) return false;
+  }
   return true;
 }
 // Binary names — matched as path-terminated segments (not substring)

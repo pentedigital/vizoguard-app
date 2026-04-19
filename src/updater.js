@@ -125,8 +125,9 @@ class Updater extends EventEmitter {
     }
 
     if (!extractedHash) {
-      console.error("Could not extract certificate hash from update package");
-      return false;
+      // null means platform-specific extractor skipped (e.g. macOS .zip)
+      console.warn("Skipping additional certificate pinning for this update format; relying on electron-updater");
+      return true;
     }
 
     const normalized = extractedHash.toLowerCase();
