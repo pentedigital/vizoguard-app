@@ -273,13 +273,22 @@ class ObfuscatedTransport extends EventEmitter {
         server: VLESS_SERVER,
         server_port: VLESS_PORT,
         uuid: this._getVlessUuid(),
+        multiplex: {
+          enabled: true,
+          padding: true
+        },
         tls: {
           enabled: true,
-          server_name: VLESS_SERVER
+          server_name: VLESS_SERVER,
+          utls: {
+            enabled: true,
+            fingerprint: "chrome"
+          }
         },
         transport: {
           type: "ws",
-          path: WS_PATH
+          path: WS_PATH,
+          padding: true
         }
       }, {
         type: "direct",
