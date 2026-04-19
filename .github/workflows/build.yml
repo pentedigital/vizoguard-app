@@ -99,6 +99,7 @@ jobs:
     name: Deploy to VPS
     needs: [build-mac, build-win]
     runs-on: ubuntu-latest
+    if: ${{ secrets.VPS_HOST != '' && secrets.VPS_SSH_PRIVATE_KEY != '' }}
     steps:
       - name: Download mac artifact
         uses: actions/download-artifact@v4
@@ -120,7 +121,7 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Upload installers to VPS
         run: |
@@ -133,24 +134,24 @@ jobs:
           EXE=$(ls dist/*.exe | head -1)
 
           if [ -n "$DMG_X64" ]; then
-            scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
               "$DMG_X64" root@${{ secrets.VPS_HOST }}:/var/www/vizoguard/downloads/Vizoguard-${VERSION}.dmg
           fi
 
           if [ -n "$DMG_ARM" ]; then
-            scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
               "$DMG_ARM" root@${{ secrets.VPS_HOST }}:/var/www/vizoguard/downloads/Vizoguard-${VERSION}-arm64.dmg
           fi
 
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
             "$EXE" root@${{ secrets.VPS_HOST }}:/var/www/vizoguard/downloads/Vizoguard-Setup-${VERSION}.exe
 
           # Upload auto-update feeds
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
             dist/latest-mac.yml dist/latest.yml \
             root@${{ secrets.VPS_HOST }}:/var/www/vizoguard/downloads/
 
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no root@${{ secrets.VPS_HOST }} \
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new root@${{ secrets.VPS_HOST }} \
             "cd /var/www/vizoguard/downloads && \
              cp Vizoguard-${VERSION}.dmg Vizoguard-latest.dmg && \
              [ -f Vizoguard-${VERSION}-arm64.dmg ] && cp Vizoguard-${VERSION}-arm64.dmg Vizoguard-latest-arm64.dmg || true && \
