@@ -99,7 +99,6 @@ jobs:
     name: Deploy to VPS
     needs: [build-mac, build-win]
     runs-on: ubuntu-latest
-    if: ${{ secrets.VPS_HOST != '' && secrets.VPS_SSH_PRIVATE_KEY != '' }}
     steps:
       - name: Download mac artifact
         uses: actions/download-artifact@v4
