@@ -64,6 +64,19 @@
   <span class="weekly-item"><strong id="weekly-time">0h</strong> protected</span>
 </div>
 
+<!-- 4c. Privacy intelligence summary -->
+<div class="privacy-insights glass" id="privacy-insights">
+  <div class="privacy-insights-head">
+    <div>
+      <div class="privacy-kicker">Privacy Autopilot</div>
+      <div class="privacy-title" id="privacy-insight-title">Checking device posture</div>
+    </div>
+    <div class="privacy-score-pill" id="privacy-score-pill">--</div>
+  </div>
+  <div class="privacy-detail" id="privacy-insight-detail">Vizoguard is reviewing VPN, threat filtering, and app connection behavior locally.</div>
+  <div class="privacy-explainer" id="privacy-explainer" style="display:none;"></div>
+</div>
+
 <!-- 5. Warning banner (hidden by default) -->
 <div class="warning-banner" id="warning-banner" style="display:none;"></div>
 
@@ -442,6 +455,73 @@
     }
   }
 
+  // ── Privacy Intelligence ─────────────────────────────────────
+
+  function setScoreBarsFromInsight(score) {
+    var bar1 = document.getElementById('score-bar-1');
+    var bar2 = document.getElementById('score-bar-2');
+    var bar3 = document.getElementById('score-bar-3');
+    var label = document.getElementById('score-label');
+    if (!bar1 || !bar2 || !bar3 || !label) return;
+
+    bar1.className = 'score-bar';
+    bar2.className = 'score-bar';
+    bar3.className = 'score-bar';
+
+    if (score >= 85) {
+      bar1.className = 'score-bar active';
+      bar2.className = 'score-bar active';
+      bar3.className = 'score-bar active';
+      label.style.color = 'var(--teal)';
+    } else if (score >= 65) {
+      bar1.className = 'score-bar active amber';
+      bar2.className = 'score-bar active amber';
+      label.style.color = 'var(--amber)';
+    } else {
+      bar1.className = 'score-bar active red';
+      label.style.color = 'var(--red)';
+    }
+    label.textContent = score + '/100';
+  }
+
+  function updatePrivacyInsights(data) {
+    if (!data) return;
+    var card = document.getElementById('privacy-insights');
+    var title = document.getElementById('privacy-insight-title');
+    var detail = document.getElementById('privacy-insight-detail');
+    var pill = document.getElementById('privacy-score-pill');
+    var explainer = document.getElementById('privacy-explainer');
+    var finding = data.findings && data.findings[0];
+
+    if (card) {
+      card.classList.remove('good', 'watch', 'risk');
+      card.classList.add(data.score >= 85 ? 'good' : data.score >= 65 ? 'watch' : 'risk');
+    }
+    if (pill) pill.textContent = data.score + '/100';
+    if (title) title.textContent = finding ? finding.title : data.label;
+    if (detail) detail.textContent = finding ? finding.detail : 'Privacy posture is being monitored locally.';
+    if (explainer) {
+      var latest = data.explanations && data.explanations[0];
+      if (latest) {
+        explainer.style.display = '';
+        explainer.textContent = latest.title + ': ' + latest.detail;
+      } else {
+        explainer.style.display = 'none';
+        explainer.textContent = '';
+      }
+    }
+    setScoreBarsFromInsight(data.score || 0);
+  }
+
+  async function loadPrivacyInsights() {
+    try {
+      var insights = await window.vizoguard.getPrivacyInsights();
+      updatePrivacyInsights(insights);
+    } catch (e) {
+      // Non-fatal: older preload or main process.
+    }
+  }
+
   // ── Check for updates ─────────────────────────────────────────
 
   async function checkUpdate() {
@@ -456,6 +536,7 @@
   window.vizoguard.onVpnState(function(data) {
     vpnConnected = data.connected;
     setVpnState(data.connected ? 'connected' : 'idle');
+    loadPrivacyInsights();
 
     // Windows proxy scope notice (show once per session)
     if (data.connected && window.vizoguard.platform === 'win32' && !window._winProxyNoticeShown) {
@@ -550,6 +631,12 @@
     showToast(data.message, true);
   });
 
+  if (window.vizoguard.onPrivacyUpdate) {
+    window.vizoguard.onPrivacyUpdate(function(data) {
+      updatePrivacyInsights(data);
+    });
+  }
+
   window.vizoguard.onImmuneAlert(function(data) {
     var wh = document.getElementById('wh-text');
     if (wh) {
@@ -602,6 +689,7 @@
 
     // Load weekly stats on init
     loadWeeklyStats();
+    loadPrivacyInsights();
 
     // periodic weekly stats refresh (every 5 minutes)
     // eng-threats and eng-connections are updated by 1s engine:subscribe push — no polling needed

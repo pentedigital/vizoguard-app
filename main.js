@@ -7,7 +7,7 @@ const VpnManager = require("./src/vpn");
 const DirectTransport = require("./src/transports/direct");
 const ObfuscatedTransport = require("./src/transports/obfuscated");
 const ConnectionManager = require("./src/connection-manager");
-const { ThreatChecker, ConnectionMonitor, SecurityProxy, ImmuneSystem } = require("./src/core");
+const { ThreatChecker, ConnectionMonitor, SecurityProxy, ImmuneSystem, PrivacyIntelligence } = require("./src/core");
 const { createTray, updateMenu, destroyTray } = require("./src/tray");
 const Updater = require("./src/updater");
 const { apiCall } = require("./src/api");
@@ -41,6 +41,7 @@ if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 const threatChecker = new ThreatChecker(dataDir);
 const connectionMonitor = new ConnectionMonitor();
 const securityProxy = new SecurityProxy(threatChecker);
+const privacyIntelligence = new PrivacyIntelligence();
 const immuneSystem = new ImmuneSystem(app.isPackaged ? path.dirname(app.getPath("exe")) : __dirname, app.isPackaged);
 const vpn = new VpnManager(store);
 const directTransport = new DirectTransport(vpn);
@@ -216,6 +217,7 @@ securityProxy.on("blocked", (data) => {
   const domain = (() => { try { return new URL(data.url).hostname; } catch { return data.url; } })();
   logConnection('threat_blocked', { url: domain, risk: data.risk });
   updateWeeklyStats('threat');
+  privacyIntelligence.recordThreat(data);
   sendToRenderer("threat:blocked", {
     url: data.url,
     risk: data.risk,
@@ -225,7 +227,16 @@ securityProxy.on("blocked", (data) => {
 });
 
 connectionMonitor.on("scan", (data) => {
+  privacyIntelligence.updateScan(data);
   sendToRenderer("connections:update", data);
+});
+
+connectionMonitor.on("new-connection", (conn) => {
+  privacyIntelligence.recordConnection(conn);
+});
+
+privacyIntelligence.on("update", (data) => {
+  sendToRenderer("privacy:update", data);
 });
 
 immuneSystem.on("alert", (data) => {
@@ -241,6 +252,7 @@ connectionManager.on("connected", (info) => {
   const mode = info && info.mode || "unknown";
   logConnection('connected', { mode });
   updateWeeklyStats('connection');
+  privacyIntelligence.setVpnState(true);
   if (_weeklyTimeInterval) clearInterval(_weeklyTimeInterval);
   _weeklyTimeInterval = setInterval(() => {
     if (connectionManager.isConnected) updateWeeklyStats('time');
@@ -255,6 +267,7 @@ connectionManager.on("disconnected", () => {
   const duration = _vpnConnectTime ? Math.floor((Date.now() - _vpnConnectTime) / 1000) : undefined;
   logConnection('disconnected', duration !== undefined ? { duration } : {});
   _vpnConnectTime = null;
+  privacyIntelligence.setVpnState(false);
   if (_weeklyTimeInterval) { clearInterval(_weeklyTimeInterval); _weeklyTimeInterval = null; }
   sendToRenderer("vpn:state", { connected: false });
   updateMenu(false, trayCallbacks);
@@ -407,6 +420,12 @@ ipcMain.handle("security:stats", () => {
     proxyRunning: !!securityProxy._server,
     vpnConnected: vpn.isConnected,
   };
+});
+
+ipcMain.handle("privacy:insights", () => {
+  privacyIntelligence.setVpnState(connectionManager.isConnected || vpn.isConnected);
+  privacyIntelligence.setProxyState(!!securityProxy._server);
+  return privacyIntelligence.getInsights();
 });
 
 ipcMain.handle("update:install", () => {
@@ -611,8 +630,10 @@ async function startSecurityEngine() {
   _engineStarted = true;
   try {
     await securityProxy.start();
+    privacyIntelligence.setProxyState(true);
   } catch (e) {
     _engineStarted = false;
+    privacyIntelligence.setProxyState(false);
     console.error("Security proxy failed to start:", e.message);
     sendToRenderer("security:error", { message: `Security proxy unavailable: ${e.message}` });
     return;

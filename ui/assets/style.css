@@ -892,6 +892,71 @@ a:hover { opacity: 0.8; }
   opacity: 0.5;
 }
 
+/* ── Privacy Intelligence ─────────────────────────────────── */
+.privacy-insights {
+  margin: 12px 20px 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+}
+
+.privacy-insights.good { border-color: rgba(0,229,160,0.26); }
+.privacy-insights.watch { border-color: rgba(255,185,85,0.32); }
+.privacy-insights.risk { border-color: rgba(255,59,59,0.32); }
+
+.privacy-insights-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.privacy-kicker {
+  font-family: var(--mono);
+  color: var(--mist);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 4px;
+}
+
+.privacy-title {
+  color: var(--ice);
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.privacy-score-pill {
+  min-width: 54px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.28);
+  color: var(--teal);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  text-align: center;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.privacy-insights.watch .privacy-score-pill { color: var(--amber); }
+.privacy-insights.risk .privacy-score-pill { color: var(--red); }
+
+.privacy-detail {
+  color: var(--mist);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  margin-top: 8px;
+}
+
+.privacy-explainer {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  color: var(--ice);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
 /* ── Settings section label ────────────────────────────────── */
 .settings-section-label {
   font-family: var(--font);
