@@ -71,6 +71,11 @@ class PrivacyIntelligence extends EventEmitter {
     this._proxyRunning = false;
     this._threatsBlocked = 0;
     this._now = options.now || (() => Date.now());
+    this._whitelist = new Set();
+  }
+
+  whitelistIp(ip) {
+    if (ip) this._whitelist.add(ip);
   }
 
   setVpnState(connected) {
@@ -113,7 +118,7 @@ class PrivacyIntelligence extends EventEmitter {
         detail: `${processName} opened a connection to port ${endpoint.port}. This port is commonly used by remote access, mail, or legacy services.`,
       });
     }
-    if (isIpAddress(endpoint.host) && !isPrivateHost(endpoint.host)) {
+    if (isIpAddress(endpoint.host) && !isPrivateHost(endpoint.host) && !this._whitelist.has(endpoint.host)) {
       risks.push({
         severity: "low",
         title: "Direct IP connection",

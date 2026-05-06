@@ -43,6 +43,15 @@ const threatChecker = new ThreatChecker(dataDir);
 const connectionMonitor = new ConnectionMonitor();
 const securityProxy = new SecurityProxy(threatChecker);
 const privacyIntelligence = new PrivacyIntelligence();
+
+// Whitelist VPN server IP to avoid false "direct IP connection" warnings
+function whitelistVpnServer() {
+  const accessUrl = store.get("license.vpnAccessUrl") || "";
+  const match = accessUrl.match(/@([^:]+):/);
+  if (match) privacyIntelligence.whitelistIp(match[1]);
+}
+whitelistVpnServer();
+
 const immuneSystem = new ImmuneSystem(app.isPackaged ? path.dirname(app.getPath("exe")) : __dirname, app.isPackaged);
 const vpn = new VpnManager(store);
 const directTransport = new DirectTransport(vpn);
@@ -250,6 +259,7 @@ let _vpnConnectTime = null;
 
 connectionManager.on("connected", (info) => {
   _vpnConnectTime = Date.now();
+  whitelistVpnServer();
   const mode = info && info.mode || "unknown";
   logConnection('connected', { mode });
   updateWeeklyStats('connection');

@@ -14,7 +14,7 @@ describe("macOS build configuration validation", () => {
   });
 
   it("all darwin binaries exist for both architectures", () => {
-    const arches = ["darwin-amd64", "darwin-arm64"];
+    const arches = ["darwin-x64", "darwin-arm64"];
     const bins = ["sing-box", "tun2socks"];
     for (const arch of arches) {
       for (const bin of bins) {
@@ -34,7 +34,7 @@ describe("macOS build configuration validation", () => {
   });
 
   it("binaries are Mach-O format (magic bytes check)", () => {
-    const arches = ["darwin-amd64", "darwin-arm64"];
+    const arches = ["darwin-x64", "darwin-arm64"];
     for (const arch of arches) {
       const singBox = fs.readFileSync(path.join("bin", arch, "sing-box"));
       const tun2socks = fs.readFileSync(path.join("bin", arch, "tun2socks"));

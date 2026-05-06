@@ -59,7 +59,7 @@ class ObfuscatedTransport extends EventEmitter {
 
   _getBinaryPath() {
     const platform = process.platform === "darwin" ? "darwin" : "win";
-    const arch = process.arch === "arm64" ? "arm64" : "amd64";
+    const arch = process.arch === "arm64" ? "arm64" : (process.platform === "darwin" ? "x64" : "amd64");
     const ext = process.platform === "win32" ? ".exe" : "";
 
     // extraFiles: <install-dir>/bin/ — go up from resources/ to find it
