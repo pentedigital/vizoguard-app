@@ -336,7 +336,7 @@ class VpnManager extends EventEmitter {
       await elevatedBatch([...routeCmds, ...dnsCmds]);
       this._routes.markApplied();
       this._dns.markApplied();
-      console.log(`Routes + DNS applied in single elevated call (${routeCmds.length + dnsCmds.length} commands)`);
+      console.log(sanitize(`Routes + DNS applied in single elevated call (${routeCmds.length + dnsCmds.length} commands)`));
     } catch (e) {
       console.error("Routes + DNS batch failed, rolling back:", e.message);
       await this._rollback();
@@ -363,7 +363,7 @@ class VpnManager extends EventEmitter {
       const allCmds = [...dnsCmds, ...routeCmds];
       if (allCmds.length > 0) {
         await elevatedBatch(allCmds, { ignoreErrors: true });
-        console.log(`DNS + routes restored in single elevated call (${allCmds.length} commands)`);
+        console.log(sanitize(`DNS + routes restored in single elevated call (${allCmds.length} commands)`));
       }
     } catch (e) { console.error("Rollback DNS+routes:", e.message); }
     // Reset internal state flags regardless — we've done our best to restore

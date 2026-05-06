@@ -84,21 +84,8 @@ function createWindow(page) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
       preload: path.join(__dirname, "preload.js"),
-      // SECURITY: Content Security Policy to prevent XSS
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'"], // inline needed for bundled JS
-          styleSrc: ["'self'", "'unsafe-inline'"],
-          imgSrc: ["'self'", "data:", "https:"],
-          connectSrc: ["'self'", "https://vizoguard.com", "https://www.vizoguard.com"],
-          fontSrc: ["'self'"],
-          objectSrc: ["'none'"],
-          mediaSrc: ["'self'"],
-          frameSrc: ["'none'"],
-        },
-      },
     },
   });
 
@@ -695,6 +682,19 @@ process.on('unhandledRejection', (reason) => {
 // ── App Lifecycle ─────────────────────────────
 
 app.whenReady().then(async () => {
+  // SECURITY: Restrict WebRTC to prevent IP leaks through STUN
+  app.commandLine.appendSwitch("force-webrtc-ip-handling-policy", "disable_non_proxied_udp");
+
+  // SECURITY: Enforce CSP at the session level for all renderer navigations
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        "Content-Security-Policy": ["default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; media-src 'self'; frame-src 'none';"],
+      },
+    });
+  });
+
   // Crash recovery: stop any leftover transports from previous session
   connectionManager.emergencyStop().catch(() => {});
   vpn._rollback().catch(() => {});

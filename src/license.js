@@ -1,6 +1,7 @@
 const { apiCall } = require("./api");
 const platform = require("./platform");
 const crypto = require("crypto");
+const { sanitize } = require("./util/sanitize");
 
 const GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -98,7 +99,7 @@ class LicenseManager {
         this.store.set("license.vpnAccessUrl", vpn.access_url);
       }
     } catch (err) {
-      console.error("VPN provisioning failed (non-fatal):", err.message || err.error);
+      console.error("VPN provisioning failed (non-fatal):", sanitize(err.message || err.error || ""));
     }
 
     return { success: true, status: result.status, expires: result.expires };
@@ -218,7 +219,7 @@ class LicenseManager {
       }
 
       // Network error — check grace period
-      console.error("License validation failed (network):", err.message || err);
+      console.error("License validation failed (network):", sanitize(String(err.message || err)));
       if (this.isGracePeriodValid() && !this.isExpired()) {
         this._emit({ valid: true, status: "offline", expires: this.store.get("license.expires") });
         return { valid: true, status: "offline", expires: this.store.get("license.expires") };

@@ -338,7 +338,7 @@ class ObfuscatedTransport extends EventEmitter {
     // Resolve server IP BEFORE TUN goes up (DNS won't work after)
     console.log(`Resolving ${VLESS_SERVER}...`);
     const serverIps = await this._resolveServerIp();
-    console.log(`Resolved ${VLESS_SERVER} → ${serverIps.join(", ")}`);
+    console.log(sanitize(`Resolved ${VLESS_SERVER} → ${serverIps.join(", ")}`));
 
     // Generate and validate config before writing
     const config = this._generateConfig(serverIps);
@@ -350,7 +350,7 @@ class ObfuscatedTransport extends EventEmitter {
     try { fs.unlinkSync(logFile); } catch {}
 
     console.log(`Starting sing-box (obfuscated): ${binPath}`);
-    console.log(`Config: ${configPath}, PID file: ${pidFile}, Log: ${logFile}`);
+    console.log(sanitize(`Config: ${configPath}, PID file: ${pidFile}, Log: ${logFile}`));
 
     try {
       if (process.platform === "win32") {
