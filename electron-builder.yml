@@ -37,6 +37,7 @@ mac:
       filter:
         - "**/*"
 
+afterPack: build/flip-fuses.js
 afterSign: build/notarize.js
 
 win:
