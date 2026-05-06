@@ -2,6 +2,7 @@ const { apiCall } = require("./api");
 const platform = require("./platform");
 const crypto = require("crypto");
 const { sanitize } = require("./util/sanitize");
+const { verifyLicenseResponse } = require("./util/license-verify");
 
 const GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -76,9 +77,12 @@ class LicenseManager {
       throw err;
     }
 
-    // SECURITY: Validate response structure to prevent tampering
+    // SECURITY: Validate response signature and structure
+    if (!verifyLicenseResponse(result)) {
+      throw new Error("License response verification failed — possible tampering or replay attack detected");
+    }
     if (!this._validateLicenseResponse(result)) {
-      throw new Error("License response validation failed - possible tampering detected");
+      throw new Error("License response validation failed — possible tampering detected");
     }
 
     this.store.set("license", {
@@ -155,7 +159,10 @@ class LicenseManager {
       const result = await apiCall("/license", { key, device_id: deviceId });
 
       const previousStatus = this.store.get("license.status");
-      // SECURITY: Validate response before storing
+      // SECURITY: Validate response signature and structure before storing
+      if (!verifyLicenseResponse(result)) {
+        throw new Error("License response verification failed");
+      }
       if (!this._validateLicenseResponse(result)) {
         throw new Error("License response validation failed");
       }
