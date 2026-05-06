@@ -138,7 +138,8 @@ jobs:
             cp "$DMG_ARM" /var/www/vizoguard/downloads/Vizoguard-${VERSION}-arm64.dmg
           fi
 
-          cp "$EXE" /var/www/vizoguard/downloads/Vizoguard-Setup-${VERSION}.exe
+          # Preserve original filename (with spaces) so latest.yml references match
+          cp "$EXE" "/var/www/vizoguard/downloads/Vizoguard Setup ${VERSION}.exe"
 
           # Copy auto-update feeds
           cp dist/latest-mac.yml dist/latest.yml /var/www/vizoguard/downloads/
@@ -146,7 +147,7 @@ jobs:
           # Update symlinks
           ln -sf Vizoguard-${VERSION}.dmg /var/www/vizoguard/downloads/Vizoguard-latest.dmg
           [ -f /var/www/vizoguard/downloads/Vizoguard-${VERSION}-arm64.dmg ] && ln -sf Vizoguard-${VERSION}-arm64.dmg /var/www/vizoguard/downloads/Vizoguard-latest-arm64.dmg || true
-          ln -sf Vizoguard-Setup-${VERSION}.exe /var/www/vizoguard/downloads/Vizoguard-Setup-latest.exe
+          ln -sf "Vizoguard Setup ${VERSION}.exe" /var/www/vizoguard/downloads/Vizoguard-latest.exe
 
           ls -lh /var/www/vizoguard/downloads/
 
