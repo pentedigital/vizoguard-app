@@ -699,6 +699,9 @@ app.whenReady().then(async () => {
   connectionManager.emergencyStop().catch(() => {});
   vpn._rollback().catch(() => {});
 
+  // Clean up stale temp files from crash/force-quit and register exit handler
+  require("./src/util/temp-cleanup").registerTempCleanup();
+
   // Clean up on exit
   process.on('SIGTERM', () => { connectionManager.emergencyStop().catch(() => {}); vpn._rollback().catch(() => {}).finally(() => { shutdownDaemon().catch(() => {}); process.exit(0); }); });
   process.on('SIGINT', () => { connectionManager.emergencyStop().catch(() => {}); vpn._rollback().catch(() => {}).finally(() => { shutdownDaemon().catch(() => {}); process.exit(0); }); });

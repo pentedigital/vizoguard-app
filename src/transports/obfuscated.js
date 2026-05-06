@@ -332,6 +332,9 @@ class ObfuscatedTransport extends EventEmitter {
     const logFile = this._getLogFile();
     this._logFile = logFile;
 
+    // Rotate log if it exceeds size limit before starting a new session
+    require("../util/temp-cleanup").rotateLogIfNeeded(logFile);
+
     // Save current default gateway for rollback safety net
     await this._saveGateway();
 
