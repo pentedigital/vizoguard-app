@@ -37,7 +37,8 @@ mac:
   icon: build/icon.png
   hardenedRuntime: true
   gatekeeperAssess: false
-  afterSign: build/notarize.js
+
+afterSign: build/notarize.js
 
 win:
   target:
