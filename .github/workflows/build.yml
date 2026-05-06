@@ -33,6 +33,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Set build-time signing flag
+        run: |
+          if [ -n "${{ secrets.MAC_CERTIFICATE_P12_BASE64 }}" ]; then
+            echo 'module.exports = { signed: true };' > src/build-config.js
+          else
+            echo 'module.exports = { signed: false };' > src/build-config.js
+          fi
+
       - name: Build macOS dmg
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.MAC_CERTIFICATE_P12_BASE64 && 'true' || 'false' }}
@@ -63,16 +71,24 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
           cache: npm
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Set build-time signing flag
+        shell: pwsh
+        run: |
+          $signed = if ($env:WIN_CSC_LINK) { 'true' } else { 'false' }
+          "module.exports = { signed: $signed };" | Out-File -FilePath src/build-config.js -Encoding utf8
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CERTIFICATE_P12_BASE64 || '' }}
 
       - name: Build Windows NSIS installer
         shell: pwsh
@@ -88,7 +104,7 @@ jobs:
           npm run build:win -- --publish always
 
       - name: Upload exe artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: win-exe
           path: |
@@ -99,7 +115,7 @@ jobs:
   deploy:
     name: Deploy to VPS
     needs: [build-mac, build-win]
-    runs-on: vizoguard-vps
+    runs-on: ubuntu-latest
     if: github.repository == 'pentedigital/vizoguard-app'
     steps:
       - name: Download mac artifact
@@ -109,7 +125,7 @@ jobs:
           path: dist/
 
       - name: Download win artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: win-exe
           path: dist/
@@ -118,12 +134,27 @@ jobs:
         run: ls -lh dist/
 
       - name: Copy installers to downloads directory
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
         run: |
           VERSION=$(grep '^version:' dist/latest.yml | awk '{print $2}')
           echo "Deploying version: $VERSION"
 
+          # Setup SSH
+          mkdir -p ~/.ssh
+          echo "$VPS_SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          cat >> ~/.ssh/config <<EOF
+          Host vps
+            HostName $VPS_HOST
+            User root
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking no
+          EOF
+
           # Ensure downloads directory exists
-          mkdir -p /var/www/vizoguard/downloads/
+          ssh vps "mkdir -p /var/www/vizoguard/downloads/"
 
           # Copy Mac DMGs (x64 + arm64 separately)
           DMG_X64=$(ls dist/Vizoguard-${VERSION}.dmg 2>/dev/null || ls dist/*-${VERSION}.dmg 2>/dev/null | grep -v arm64 | head -1)
@@ -131,25 +162,27 @@ jobs:
           EXE=$(ls dist/*.exe | head -1)
 
           if [ -n "$DMG_X64" ]; then
-            cp "$DMG_X64" /var/www/vizoguard/downloads/Vizoguard-${VERSION}.dmg
+            scp "$DMG_X64" vps:/var/www/vizoguard/downloads/Vizoguard-${VERSION}.dmg
           fi
 
           if [ -n "$DMG_ARM" ]; then
-            cp "$DMG_ARM" /var/www/vizoguard/downloads/Vizoguard-${VERSION}-arm64.dmg
+            scp "$DMG_ARM" vps:/var/www/vizoguard/downloads/Vizoguard-${VERSION}-arm64.dmg
           fi
 
           # Preserve original filename (with spaces) so latest.yml references match
-          cp "$EXE" "/var/www/vizoguard/downloads/Vizoguard Setup ${VERSION}.exe"
+          scp "$EXE" "vps:/var/www/vizoguard/downloads/Vizoguard Setup ${VERSION}.exe"
 
           # Copy auto-update feeds
-          cp dist/latest-mac.yml dist/latest.yml /var/www/vizoguard/downloads/
+          scp dist/latest-mac.yml dist/latest.yml vps:/var/www/vizoguard/downloads/
 
-          # Update symlinks
-          ln -sf Vizoguard-${VERSION}.dmg /var/www/vizoguard/downloads/Vizoguard-latest.dmg
-          [ -f /var/www/vizoguard/downloads/Vizoguard-${VERSION}-arm64.dmg ] && ln -sf Vizoguard-${VERSION}-arm64.dmg /var/www/vizoguard/downloads/Vizoguard-latest-arm64.dmg || true
-          ln -sf "Vizoguard Setup ${VERSION}.exe" /var/www/vizoguard/downloads/Vizoguard-latest.exe
-
-          ls -lh /var/www/vizoguard/downloads/
+          # Update symlinks on server
+          ssh vps "
+            cd /var/www/vizoguard/downloads/
+            ln -sf Vizoguard-${VERSION}.dmg Vizoguard-latest.dmg
+            [ -f Vizoguard-${VERSION}-arm64.dmg ] && ln -sf Vizoguard-${VERSION}-arm64.dmg Vizoguard-latest-arm64.dmg || true
+            ln -sf 'Vizoguard Setup ${VERSION}.exe' Vizoguard-latest.exe
+            ls -lh .
+          "
 
       - name: Notify success
         if: success()

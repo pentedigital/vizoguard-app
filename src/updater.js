@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { spawn } = require("child_process");
+const semver = require("semver");
 
 // Expected code signing certificates (SHA-256 hashes of certificate data or thumbprints)
 // Set VIZOGUARD_TRUSTED_CERTS env var to a comma-separated list of hashes.
@@ -14,37 +15,13 @@ const TRUSTED_CERTIFICATE_HASHES = process.env.VIZOGUARD_TRUSTED_CERTS?.split(",
 const MINIMUM_VERSION = process.env.VIZOGUARD_MIN_VERSION || "1.0.0";
 
 /**
- * Detect whether the currently running app bundle is code-signed.
- * On signed builds we enforce signature verification on updates.
- * On unsigned builds (e.g. CI secrets missing) we skip verification
- * so users still receive updates.
+ * Build-time signing flag — set by CI when code-signing secrets are present.
+ * Runtime self-detection was removed because an attacker who strips the
+ * signature can also disable verification. Build-time is the only
+ * trustworthy signal.
  */
-function isCurrentAppSigned() {
-  try {
-    if (process.platform === "darwin") {
-      const appPath = process.resourcesPath.replace("/Contents/Resources", "");
-      spawn("codesign", ["-dv", appPath]).on("error", () => {});
-      // codesign -dv exits 0 when signed, non-zero when unsigned.
-      // We use a synchronous check for simplicity.
-      const result = require("child_process").execSync(`codesign -dv "${appPath}" 2>&1`, { encoding: "utf8" });
-      return result.includes("Signature=") || result.includes("Authority=");
-    }
-    if (process.platform === "win32") {
-      const exePath = process.execPath;
-      const script = `Get-AuthenticodeSignature -FilePath '${exePath.replace(/'/g, "''")}' | Select-Object -ExpandProperty Status`;
-      const result = require("child_process").execSync(
-        `powershell -NoProfile -Command "${script}"`,
-        { encoding: "utf8", timeout: 5000 }
-      );
-      return result.trim() === "Valid";
-    }
-  } catch (_err) {
-    // Unsigned or detection failed
-  }
-  return false;
-}
-
-const APP_IS_SIGNED = isCurrentAppSigned();
+const buildConfig = require("./build-config");
+const APP_IS_SIGNED = buildConfig.signed === true;
 
 class Updater extends EventEmitter {
   constructor() {
@@ -117,15 +94,7 @@ class Updater extends EventEmitter {
    * Check if version meets minimum requirement (prevents downgrade attacks)
    */
   _isVersionAllowed(version) {
-    const parse = (v) => v.split(".").map(Number);
-    const [maj1, min1, pat1] = parse(version);
-    const [maj2, min2, pat2] = parse(MINIMUM_VERSION);
-
-    if (maj1 > maj2) return true;
-    if (maj1 < maj2) return false;
-    if (min1 > min2) return true;
-    if (min1 < min2) return false;
-    return pat1 >= pat2;
+    return semver.gte(version, MINIMUM_VERSION);
   }
 
   /**
