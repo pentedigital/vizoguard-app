@@ -1,7 +1,8 @@
 const { app, BrowserWindow, ipcMain, clipboard, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const Store = require("electron-store");
+const StoreModule = require("electron-store");
+const Store = StoreModule.default || StoreModule;
 const LicenseManager = require("./src/license");
 const VpnManager = require("./src/vpn");
 const DirectTransport = require("./src/transports/direct");

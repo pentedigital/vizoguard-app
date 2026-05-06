@@ -35,6 +35,9 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   icon: build/icon.png
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  afterSign: build/notarize.js
 
 win:
   target:
