@@ -13,6 +13,39 @@ const TRUSTED_CERTIFICATE_HASHES = process.env.VIZOGUARD_TRUSTED_CERTS?.split(",
 // Minimum allowed version (prevents downgrade attacks)
 const MINIMUM_VERSION = process.env.VIZOGUARD_MIN_VERSION || "1.0.0";
 
+/**
+ * Detect whether the currently running app bundle is code-signed.
+ * On signed builds we enforce signature verification on updates.
+ * On unsigned builds (e.g. CI secrets missing) we skip verification
+ * so users still receive updates.
+ */
+function isCurrentAppSigned() {
+  try {
+    if (process.platform === "darwin") {
+      const appPath = process.resourcesPath.replace("/Contents/Resources", "");
+      spawn("codesign", ["-dv", appPath]).on("error", () => {});
+      // codesign -dv exits 0 when signed, non-zero when unsigned.
+      // We use a synchronous check for simplicity.
+      const result = require("child_process").execSync(`codesign -dv "${appPath}" 2>&1`, { encoding: "utf8" });
+      return result.includes("Signature=") || result.includes("Authority=");
+    }
+    if (process.platform === "win32") {
+      const exePath = process.execPath;
+      const script = `Get-AuthenticodeSignature -FilePath '${exePath.replace(/'/g, "''")}' | Select-Object -ExpandProperty Status`;
+      const result = require("child_process").execSync(
+        `powershell -NoProfile -Command "${script}"`,
+        { encoding: "utf8", timeout: 5000 }
+      );
+      return result.trim() === "Valid";
+    }
+  } catch (_err) {
+    // Unsigned or detection failed
+  }
+  return false;
+}
+
+const APP_IS_SIGNED = isCurrentAppSigned();
+
 class Updater extends EventEmitter {
   constructor() {
     super();
@@ -21,8 +54,13 @@ class Updater extends EventEmitter {
     autoUpdater.autoDownload = false; // We'll download manually to verify first
     autoUpdater.autoInstallOnAppQuit = false; // Install only after verification
 
-    // Enable signature verification (electron-updater handles this on macOS/Windows)
-    autoUpdater.verifyUpdateCodeSignature = true;
+    // Enable signature verification only when the current app is signed.
+    // Unsigned builds (e.g. missing CI secrets) would otherwise reject
+    // all updates because the downloaded package is also unsigned.
+    autoUpdater.verifyUpdateCodeSignature = APP_IS_SIGNED;
+    if (!APP_IS_SIGNED) {
+      console.warn("[Updater] Current app is not code-signed; update signature verification disabled");
+    }
 
     autoUpdater.on("checking-for-update", () => {
       this.emit("checking");

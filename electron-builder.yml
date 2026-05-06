@@ -19,12 +19,6 @@ extraResources:
   - from: "src/elevation-daemon.js"
     to: "elevation-daemon.js"
 
-extraFiles:
-  - from: "bin/darwin-${arch}"
-    to: "bin"
-    filter:
-      - "**/*"
-
 mac:
   category: public.app-category.utilities
   target:
@@ -37,6 +31,11 @@ mac:
   icon: build/icon.png
   hardenedRuntime: true
   gatekeeperAssess: false
+  extraFiles:
+    - from: "bin/darwin-${arch}"
+      to: "bin"
+      filter:
+        - "**/*"
 
 afterSign: build/notarize.js
 
