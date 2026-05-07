@@ -64,7 +64,7 @@ function isAllowedPowerShell(cmd) {
   return true;
 }
 // Binary names — matched as path-terminated segments (not substring)
-const ALLOWED_BINARY_RE = /(?:^|[/\\])(?:tun2socks|sing-box)(?:\.exe)?$/;
+const ALLOWED_BINARY_RE = /(?:^|[/\\])(?:tun2socks|sing-box)(?:\.exe)?(?:\s|$)/;
 
 function isSingleCommandAllowed(cmd) {
   cmd = cmd.trim();
