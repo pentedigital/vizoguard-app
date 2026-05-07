@@ -333,7 +333,9 @@ ipcMain.handle("vpn:connect", async () => {
         await obfuscatedTransport.provisionUuid(cached.key, store.get("deviceId"));
       }
     } catch (e) {
-      console.log(`VLESS UUID provision skipped: ${e.message}`);
+      console.error("VLESS UUID provision failed:", e.message);
+      // Non-fatal: obfuscated transport will auto-retry during fallback,
+      // but surface a warning so the user knows if both modes fail.
     }
 
     await connectionManager.connect();

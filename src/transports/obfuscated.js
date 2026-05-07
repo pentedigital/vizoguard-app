@@ -44,8 +44,26 @@ class ObfuscatedTransport extends EventEmitter {
 
   _getVlessUuid() {
     const uuid = this._store.get("license.vlessUuid");
-    if (!uuid) throw new Error("VLESS UUID not provisioned — call provisionUuid() first");
+    if (!uuid) throw new Error("VLESS UUID missing — obfuscated transport credentials not available");
     return uuid;
+  }
+
+  // Auto-provision UUID if missing (uses cached license key + deviceId from store)
+  async _ensureVlessUuid() {
+    const uuid = this._store.get("license.vlessUuid");
+    if (uuid) return uuid;
+
+    const key = this._store.get("license.key");
+    const deviceId = this._store.get("license.deviceId");
+    if (!key || !deviceId) {
+      throw new Error("Cannot provision VLESS UUID — no license or device ID found. Please activate your license first.");
+    }
+
+    try {
+      return await this.provisionUuid(key, deviceId);
+    } catch (err) {
+      throw new Error(`VLESS credential provisioning failed: ${err.message}`);
+    }
   }
 
   // Fetch per-device VLESS UUID from server and cache in store
@@ -325,6 +343,9 @@ class ObfuscatedTransport extends EventEmitter {
 
   async start() {
     if (this._running) return;
+
+    // Ensure UUID is available before any setup (auto-provisions if missing)
+    await this._ensureVlessUuid();
 
     const binPath = this._getBinaryPath();
     const configPath = this._getConfigPath();
