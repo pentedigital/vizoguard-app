@@ -105,6 +105,9 @@ class Dns {
   async restore() {
     try {
       if (process.platform === "darwin") {
+        // Laptops may have switched interfaces (Wi-Fi ↔ Ethernet) while VPN was up.
+        // Re-detect the current active service so we restore DNS on the right one.
+        await this._reDetectServiceDarwin();
         await this._restoreDarwin();
         await this._restoreIpv6Darwin();
       } else {
@@ -185,6 +188,33 @@ class Dns {
       : `/usr/sbin/networksetup -setdnsservers "${this._service}" Empty`;
     await elevatedExec(cmd);
     console.log(`DNS restored on ${this._service}`);
+  }
+
+  // Re-detect the currently active network service on macOS (for laptops that
+  // switched Wi-Fi / Ethernet while the VPN was connected).
+  async _reDetectServiceDarwin() {
+    try {
+      const { stdout } = await execFileAsync("/usr/sbin/networksetup", ["-listallnetworkservices"]);
+      const services = stdout.split("\n").filter(s => s && !s.startsWith("*")).map(s => s.trim());
+
+      for (const svc of services) {
+        try {
+          const { stdout: info } = await execFileAsync("/usr/sbin/networksetup", ["-getinfo", svc]);
+          if (info.includes("Router:") && !info.includes("Router: \n") && !info.includes("IP address: not available")) {
+            if (svc !== this._service) {
+              console.log(`Active interface changed: ${this._service} → ${svc}`);
+              this._service = svc;
+              // We don't have the original DNS for this new service, so we'll
+              // restore to DHCP (Empty) as the safest fallback.
+              this._originalServers = [];
+            }
+            return;
+          }
+        } catch {}
+      }
+    } catch {
+      // Keep the saved service if re-detection fails
+    }
   }
 
   // ── Windows ────────────────────────────────────

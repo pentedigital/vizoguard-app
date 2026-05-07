@@ -126,6 +126,17 @@ class Tunnel extends EventEmitter {
 
     console.log(`TUN interface: ${this._deviceName}`);
 
+    // Configure TUN interface IP/mask so the OS recognises the gateway
+    // (required before `route add default 10.0.85.1` will succeed)
+    if (process.platform === "darwin") {
+      try {
+        await execFileAsync("/sbin/ifconfig", [this._deviceName, TUN_IP, TUN_GW, "netmask", TUN_MASK, "up"]);
+        console.log(`Configured ${this._deviceName}: ${TUN_IP}/${TUN_MASK} gw ${TUN_GW}`);
+      } catch (ifconfigErr) {
+        console.warn(`ifconfig failed (non-fatal): ${ifconfigErr.message}`);
+      }
+    }
+
     // Monitor process health
     this._healthTimer = setInterval(() => {
       if (!this.isAlive()) {

@@ -124,10 +124,11 @@ class Routes {
     assertIp(this._originalGateway, "originalGateway");
 
     if (process.platform === "darwin") {
+      // Use `route change default` atomically so we never leave the system
+      // without a default route. Fallback to delete+add only if change fails.
       return [
         `/sbin/route add -host ${vpnServerIp} ${this._originalGateway}`,
-        `/sbin/route delete default || true`,
-        `/sbin/route add default ${tunGateway}`
+        `/sbin/route change default ${tunGateway} || (/sbin/route delete default || true && /sbin/route add default ${tunGateway})`
       ];
     } else {
       return [
@@ -143,9 +144,11 @@ class Routes {
 
     if (process.platform === "darwin") {
       assertIp(this._originalGateway, "originalGateway");
+      // Atomically change default route back; if the saved gateway is stale
+      // (common on laptops after Wi-Fi roaming / sleep-wake), fall back to
+      // re-detecting the current gateway and using that.
       const cmds = [
-        `/sbin/route delete default || true`,
-        `/sbin/route add default ${this._originalGateway}`
+        `/sbin/route change default ${this._originalGateway} || (/sbin/route delete default || true && /sbin/route add default ${this._originalGateway}) || OG=$(/sbin/route -n get default 2>/dev/null | awk '/gateway:/{print $2}') && [ -n "$OG" ] && /sbin/route add default "$OG"`
       ];
       if (this._vpnServerIp) {
         assertIp(this._vpnServerIp, "vpnServerIp");
@@ -170,8 +173,7 @@ class Routes {
 
     await elevatedBatch([
       `/sbin/route add -host ${vpnServerIp} ${this._originalGateway}`,
-      `/sbin/route delete default || true`,
-      `/sbin/route add default ${tunGateway}`
+      `/sbin/route change default ${tunGateway} || (/sbin/route delete default || true && /sbin/route add default ${tunGateway})`
     ]);
 
     console.log(`Routes applied: default → ${tunGateway}, ${vpnServerIp} → ${this._originalGateway}`);
@@ -181,8 +183,7 @@ class Routes {
     assertIp(this._originalGateway, "originalGateway");
 
     const cmds = [
-      `/sbin/route delete default || true`,
-      `/sbin/route add default ${this._originalGateway}`
+      `/sbin/route change default ${this._originalGateway} || (/sbin/route delete default || true && /sbin/route add default ${this._originalGateway}) || OG=$(/sbin/route -n get default 2>/dev/null | awk '/gateway:/{print $2}') && [ -n "$OG" ] && /sbin/route add default "$OG"`
     ];
     if (this._vpnServerIp) {
       assertIp(this._vpnServerIp, "vpnServerIp");
