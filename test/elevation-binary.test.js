@@ -45,4 +45,32 @@ describe("Elevation daemon binary allowlist", () => {
     assert.strictEqual(isSingleCommandAllowed("rm -rf /"), false);
     assert.strictEqual(isSingleCommandAllowed("curl http://evil.com"), false);
   });
+
+  it("rejects newline injection (defense-in-depth)", () => {
+    // Newline could bypass ALLOWED_BINARY_RE because \s matches \n,
+    // hiding trailing commands from the regex while exec() still runs them.
+    assert.strictEqual(
+      isSingleCommandAllowed("tun2socks -device utun\nrm -rf /"),
+      false,
+      "newline must be blocked"
+    );
+    assert.strictEqual(
+      isSingleCommandAllowed("sing-box run\necho pwned"),
+      false,
+      "newline must be blocked"
+    );
+  });
+
+  it("rejects tab and carriage-return injection", () => {
+    assert.strictEqual(
+      isSingleCommandAllowed("tun2socks\trm -rf /"),
+      false,
+      "tab must be blocked"
+    );
+    assert.strictEqual(
+      isSingleCommandAllowed("sing-box\recho pwned"),
+      false,
+      "carriage return must be blocked"
+    );
+  });
 });

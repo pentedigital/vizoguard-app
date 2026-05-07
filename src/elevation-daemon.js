@@ -76,7 +76,9 @@ function isSingleCommandAllowed(cmd) {
     return isAllowedPowerShell(cmd);
   }
   // Block shell metacharacters that could inject commands via exec()
-  if (/[|<>()`$]/.test(cmd)) return false;
+  // Newline/tab/CR are blocked because ALLOWED_BINARY_RE uses \s which matches them,
+  // allowing trailing commands to be hidden from the regex.
+  if (/[|<>()`$\n\r\t]/.test(cmd)) return false;
   const prefixes = process.platform === "win32" ? ALLOWED_PREFIXES_WIN32 : ALLOWED_PREFIXES_DARWIN;
   if (prefixes.some(p => cmd.startsWith(p))) return true;
   if (ALLOWED_BINARY_RE.test(cmd)) return true;
