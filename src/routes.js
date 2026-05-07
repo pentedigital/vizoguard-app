@@ -182,6 +182,17 @@ class Routes {
   async _restoreDarwin() {
     assertIp(this._originalGateway, "originalGateway");
 
+    // Telemetry: detect if saved gateway is stale (common after Wi-Fi roaming)
+    let currentGateway = null;
+    try {
+      const { stdout } = await execFileAsync("/sbin/route", ["-n", "get", "default"]);
+      const m = stdout.match(/gateway:\s*(\S+)/);
+      if (m) currentGateway = m[1];
+    } catch {}
+    if (currentGateway && currentGateway !== this._originalGateway) {
+      console.log(`[telemetry] route_stale_gateway saved=${this._originalGateway} current=${currentGateway}`);
+    }
+
     const cmds = [
       `/sbin/route change default ${this._originalGateway} || (/sbin/route delete default || true && /sbin/route add default ${this._originalGateway}) || OG=$(/sbin/route -n get default 2>/dev/null | awk '/gateway:/{print $2}') && [ -n "$OG" ] && /sbin/route add default "$OG"`
     ];

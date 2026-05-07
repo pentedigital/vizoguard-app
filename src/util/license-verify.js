@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const os = require("os");
 const Store = require("electron-store");
 
 // Must match backend LICENSE_RESPONSE_SECRET
@@ -11,14 +12,70 @@ const NONCE_HISTORY_SIZE = 100;
 let seenNonces = [];
 let nonceStore = null;
 
+// Derive a machine-specific encryption key so nonce stores are not portable
+// across devices (limits replay-attack surface if store file is exfiltrated).
+function _deriveEncryptionKey() {
+  const salt = "vizoguard-nonce-v1";
+  // Use stable machine properties that survive reboots but differ across hardware
+  let username;
+  try {
+    username = os.userInfo().username;
+  } catch {
+    username = process.env.USER || process.env.USERNAME || "unknown";
+  }
+  const machineId = [
+    os.hostname(),
+    os.platform(),
+    os.arch(),
+    username,
+  ].join("|");
+  return crypto.createHmac("sha256", salt).update(machineId).digest("hex");
+}
+
+function _tryLoadWithKey(key) {
+  try {
+    const store = new Store({ name: "license-nonces", encryptionKey: key });
+    const stored = store.get("seenNonces");
+    if (Array.isArray(stored) && stored.length > 0) {
+      seenNonces = stored;
+      return store;
+    }
+    // No data yet — return the store so future writes use this key
+    return store;
+  } catch {
+    return null;
+  }
+}
+
 function _getNonceStore() {
   if (!nonceStore) {
-    try {
-      nonceStore = new Store({ name: "license-nonces", encryptionKey: "vizoguard-nonce-v1" });
+    // Try machine-derived key first (preferred)
+    nonceStore = _tryLoadWithKey(_deriveEncryptionKey());
+    if (nonceStore) {
+      // Check if this is an empty store — if so, try legacy key for migration
       const stored = nonceStore.get("seenNonces");
-      if (Array.isArray(stored)) seenNonces = stored;
-    } catch {
-      // Fallback to in-memory only
+      if (!Array.isArray(stored) || stored.length === 0) {
+        const legacyStore = _tryLoadWithKey("vizoguard-nonce-v1");
+        const legacyNonces = legacyStore ? legacyStore.get("seenNonces") : null;
+        if (Array.isArray(legacyNonces) && legacyNonces.length > 0) {
+          seenNonces = legacyNonces;
+          try {
+            nonceStore.set("seenNonces", seenNonces);
+            console.log("[license-verify] Migrated nonce history from legacy key to machine-derived key");
+          } catch {
+            console.warn("[license-verify] Nonce migration failed — using in-memory only");
+            nonceStore = null;
+          }
+        }
+      }
+    }
+    if (!nonceStore) {
+      // Backward compat: fall back to legacy hardcoded key
+      nonceStore = _tryLoadWithKey("vizoguard-nonce-v1");
+    }
+    if (!nonceStore) {
+      // Last resort: in-memory only (no persistence)
+      console.warn("[license-verify] Unable to create nonce store — using in-memory only");
     }
   }
   return nonceStore;

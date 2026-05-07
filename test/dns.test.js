@@ -36,7 +36,8 @@ const Dns = require("../src/dns");
 function freshDns(overrides = {}) {
   const d = new Dns();
   d._service = "service" in overrides ? overrides.service : "Wi-Fi";
-  d._originalServers = "servers" in overrides ? overrides.servers : ["8.8.8.8", "8.8.4.4"];
+  const servers = "servers" in overrides ? overrides.servers : ["8.8.8.8", "8.8.4.4"];
+  d._serversByService[d._service] = servers;
   d._ipv6Disabled = overrides.ipv6Disabled || false;
   return d;
 }

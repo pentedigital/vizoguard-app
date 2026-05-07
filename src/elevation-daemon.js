@@ -38,6 +38,8 @@ if (!socketPath || !parentPid) {
 const ALLOWED_PREFIXES_DARWIN = [
   "/sbin/route ",
   "/usr/sbin/networksetup ",
+  "/usr/bin/awk ",
+  "awk ",
 ];
 const ALLOWED_PREFIXES_WIN32 = [
   "route ",
@@ -71,9 +73,25 @@ function isSingleCommandAllowed(cmd) {
   // Strip common trailing error suppression
   cmd = cmd.replace(/\|\|\s*(true|ver>nul)\s*$/, "").trim();
   if (!cmd) return true; // empty after stripping is fine
+  if (cmd === "true") return true;
+  if (cmd === "ver>nul") return true;
+  // Allow test expressions: [ -n "VAR" ]
+  if (cmd.startsWith("[") && cmd.endsWith("]")) return true;
+  // Allow empty variable assignments (e.g., OG= after $() removal)
+  if (/^[A-Za-z_][A-Za-z0-9_]*=$/.test(cmd)) return true;
   // PowerShell commands require dedicated security review
   if (cmd.startsWith("powershell -Command")) {
     return isAllowedPowerShell(cmd);
+  }
+  // Allow pipe chains where each segment starts with an allowed prefix or binary
+  const pipeParts = cmd.split(/\s*\|\s*/);
+  if (pipeParts.length > 1) {
+    const prefixes = process.platform === "win32" ? ALLOWED_PREFIXES_WIN32 : ALLOWED_PREFIXES_DARWIN;
+    return pipeParts.every(p => {
+      const t = p.trim();
+      if (!t) return true;
+      return prefixes.some(pre => t.startsWith(pre)) || ALLOWED_BINARY_RE.test(t);
+    });
   }
   // Block shell metacharacters that could inject commands via exec()
   // Newline/tab/CR are blocked because ALLOWED_BINARY_RE uses \s which matches them,
@@ -90,8 +108,52 @@ function isAllowed(command) {
   let normalized = command;
   if (normalized.startsWith("set -e;")) normalized = normalized.slice(7);
 
+  // Replace simple variable references ($VAR) with placeholders so they
+  // don't trigger the metacharacter blocklist in quoted arguments.
+  normalized = normalized.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, "VAR");
+
+  // Validate any $() command substitutions recursively
+  let temp = normalized;
+  let idx;
+  while ((idx = temp.indexOf("$(")) !== -1) {
+    const start = idx + 2;
+    let depth = 1;
+    let end = start;
+    while (end < temp.length && depth > 0) {
+      if (temp[end] === "(") depth++;
+      else if (temp[end] === ")") depth--;
+      end++;
+    }
+    if (depth === 0) {
+      const inner = temp.slice(start, end - 1);
+      if (!isAllowed(inner)) return false;
+      temp = temp.slice(0, idx) + " " + temp.slice(end);
+    } else {
+      return false; // unbalanced
+    }
+  }
+
+  // Validate any (...) subshell groups recursively
+  while ((idx = temp.indexOf("(")) !== -1) {
+    const start = idx + 1;
+    let depth = 1;
+    let end = start;
+    while (end < temp.length && depth > 0) {
+      if (temp[end] === "(") depth++;
+      else if (temp[end] === ")") depth--;
+      end++;
+    }
+    if (depth === 0) {
+      const inner = temp.slice(start, end - 1);
+      if (!isAllowed(inner)) return false;
+      temp = temp.slice(0, idx) + " " + temp.slice(end);
+    } else {
+      return false; // unbalanced
+    }
+  }
+
   // Split on shell separators (&&, ;, ||, &) and validate each part
-  const parts = normalized.split(/\s*(?:&&|;|\|\||&)\s*/);
+  const parts = temp.split(/\s*(?:&&|;|\|\||&)\s*/);
   return parts.every(isSingleCommandAllowed);
 }
 

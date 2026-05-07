@@ -18,7 +18,9 @@ function assertServiceName(value) {
 
 class Dns {
   constructor() {
-    this._originalServers = null;
+    // Per-service DNS server cache so custom DNS survives interface switches
+    // Format: { "Wi-Fi": ["8.8.8.8"], "Ethernet": [] }
+    this._serversByService = {};
     this._ipv6Disabled = false;
     this._service = null; // macOS network service name
     this._applied = false;
@@ -35,6 +37,8 @@ class Dns {
     } else {
       await this._saveWin32();
     }
+    // Persist per-service cache whenever we save
+    console.log(`DNS cache: ${Object.keys(this._serversByService).join(", ") || "(empty)"}`);
   }
 
   // Mark as applied/restored after external batch execution
@@ -70,9 +74,11 @@ class Dns {
     if (process.platform === "darwin") {
       if (this._service) {
         assertServiceName(this._service);
-        if (this._originalServers && this._originalServers.length > 0) {
-          this._originalServers.forEach(s => assertIp(s, "originalDnsServer"));
-          cmds.push(`/usr/sbin/networksetup -setdnsservers "${this._service}" ${this._originalServers.join(" ")}`);
+        // Look up original servers for the current service (survives interface switches)
+        const servers = this._serversByService[this._service];
+        if (servers && servers.length > 0) {
+          servers.forEach(s => assertIp(s, "originalDnsServer"));
+          cmds.push(`/usr/sbin/networksetup -setdnsservers "${this._service}" ${servers.join(" ")}`);
         } else {
           cmds.push(`/usr/sbin/networksetup -setdnsservers "${this._service}" Empty`);
         }
@@ -159,15 +165,15 @@ class Dns {
         this._service = services.includes("Wi-Fi") ? "Wi-Fi" : services[0];
       }
 
-      // Save current DNS
+      // Save current DNS per-service so we restore correctly after interface switches
       const { stdout: dnsOut } = await execFileAsync("/usr/sbin/networksetup", ["-getdnsservers", this._service]);
       if (dnsOut.includes("There aren't any")) {
-        this._originalServers = []; // DHCP DNS
+        this._serversByService[this._service] = []; // DHCP DNS
       } else {
-        this._originalServers = dnsOut.trim().split("\n").map(s => s.trim()).filter(Boolean);
+        this._serversByService[this._service] = dnsOut.trim().split("\n").map(s => s.trim()).filter(Boolean);
       }
 
-      console.log(`Saved DNS: service=${this._service}, servers=${this._originalServers.join(",") || "(DHCP)"}`);
+      console.log(`Saved DNS: service=${this._service}, servers=${(this._serversByService[this._service] || []).join(",") || "(DHCP)"}`);
     } catch (e) {
       throw new Error(`Failed to read DNS: ${e.message}`);
     }
@@ -183,8 +189,9 @@ class Dns {
     if (!this._service) return;
     assertServiceName(this._service);
 
-    const cmd = (this._originalServers && this._originalServers.length > 0)
-      ? (() => { this._originalServers.forEach(s => assertIp(s, "originalDnsServer")); return `/usr/sbin/networksetup -setdnsservers "${this._service}" ${this._originalServers.join(" ")}`; })()
+    const servers = this._serversByService[this._service];
+    const cmd = (servers && servers.length > 0)
+      ? (() => { servers.forEach(s => assertIp(s, "originalDnsServer")); return `/usr/sbin/networksetup -setdnsservers "${this._service}" ${servers.join(" ")}`; })()
       : `/usr/sbin/networksetup -setdnsservers "${this._service}" Empty`;
     await elevatedExec(cmd);
     console.log(`DNS restored on ${this._service}`);
@@ -204,9 +211,9 @@ class Dns {
             if (svc !== this._service) {
               console.log(`Active interface changed: ${this._service} → ${svc}`);
               this._service = svc;
-              // We don't have the original DNS for this new service, so we'll
-              // restore to DHCP (Empty) as the safest fallback.
-              this._originalServers = [];
+              // Per-service cache means we don't wipe DNS data here.
+              // If we have cached servers for the new service they'll be restored;
+              // otherwise the restore path falls back to DHCP (Empty).
             }
             return;
           }
@@ -236,9 +243,11 @@ class Dns {
         }
       }
 
-      this._originalServers = servers;
+      if (activeInterface) {
+        this._serversByService[activeInterface] = servers;
+      }
       this._service = activeInterface;
-      console.log(`Saved DNS: servers=${servers.join(",") || "(DHCP)"}`);
+      console.log(`Saved DNS: interface=${activeInterface}, servers=${servers.join(",") || "(DHCP)"}`);
     } catch (e) {
       throw new Error(`Failed to read DNS: ${e.message}`);
     }
