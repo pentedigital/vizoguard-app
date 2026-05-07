@@ -2,7 +2,7 @@
 // Used in censored networks (UAE, China, Iran, etc.)
 // Traffic looks like normal HTTPS to vizoguard.com
 
-const { execFile, execFileSync } = require("child_process");
+const { execFile } = require("child_process");
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
 const dns = require("dns");
@@ -12,6 +12,7 @@ const fs = require("fs");
 const { EventEmitter } = require("events");
 const { app } = require("electron");
 const { elevatedExec, elevatedBatch } = require("../elevation");
+const { sanitize } = require("../util/sanitize");
 
 // Safe shell escaping — wraps in single quotes, escapes embedded single quotes
 function shellEscape(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }

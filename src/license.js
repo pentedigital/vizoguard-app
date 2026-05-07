@@ -103,7 +103,7 @@ class LicenseManager {
         this.store.set("license.vpnAccessUrl", vpn.access_url);
       }
     } catch (err) {
-      console.error("VPN provisioning failed (non-fatal):", sanitize(err.message || err.error || ""));
+      console.error("VPN provisioning failed (non-fatal):", sanitize(String(err.message || err.error || "")));
     }
 
     return { success: true, status: result.status, expires: result.expires };

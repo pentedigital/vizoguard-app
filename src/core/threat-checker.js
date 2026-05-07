@@ -1,5 +1,4 @@
 const { EventEmitter } = require("events");
-const crypto = require("crypto");
 const path = require("path");
 const fs = require("fs");
 

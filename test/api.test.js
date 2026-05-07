@@ -372,4 +372,40 @@ describe("apiCall", () => {
 
     await rejectPromise;
   });
+
+  it("429 error retries with backoff then rejects", async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    let callCount = 0;
+    https.request = (opts, cb) => {
+      callCount++;
+      const req = new MockRequest();
+      process.nextTick(() => {
+        const res = new MockResponse(429);
+        cb(res);
+        process.nextTick(() => {
+          res.emit("data", JSON.stringify({ error: "rate limited" }));
+          res.emit("end");
+        });
+      });
+      return req;
+    };
+
+    const promise = apiCall("/test", {});
+    const rejectPromise = assert.rejects(
+      () => promise,
+      (err) => {
+        assert.equal(err.httpStatus, 429);
+        return true;
+      }
+    );
+
+    for (let i = 0; i < 10; i++) await flush();
+    mock.timers.tick(1000);
+    for (let i = 0; i < 10; i++) await flush();
+    mock.timers.tick(2000);
+    for (let i = 0; i < 10; i++) await flush();
+
+    await rejectPromise;
+    assert.equal(callCount, 3);
+  });
 });

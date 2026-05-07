@@ -55,8 +55,8 @@ async function apiCall(endpoint, body) {
       return await singleRequest(endpoint, body);
     } catch (err) {
       const isLastAttempt = attempt === MAX_RETRIES;
-      // Only retry on 5xx or network errors, never on 4xx
-      const isRetryable = !err.httpStatus || err.httpStatus >= 500;
+      // Only retry on 5xx, 429, or network errors, never on other 4xx
+      const isRetryable = !err.httpStatus || err.httpStatus >= 500 || err.httpStatus === 429;
       if (isLastAttempt || !isRetryable) throw err;
       await new Promise((r) => setTimeout(r, BASE_DELAY * Math.pow(2, attempt)));
     }

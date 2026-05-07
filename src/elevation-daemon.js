@@ -75,6 +75,8 @@ function isSingleCommandAllowed(cmd) {
   if (cmd.startsWith("powershell -Command")) {
     return isAllowedPowerShell(cmd);
   }
+  // Block shell metacharacters that could inject commands via exec()
+  if (/[|<>()`$]/.test(cmd)) return false;
   const prefixes = process.platform === "win32" ? ALLOWED_PREFIXES_WIN32 : ALLOWED_PREFIXES_DARWIN;
   if (prefixes.some(p => cmd.startsWith(p))) return true;
   if (ALLOWED_BINARY_RE.test(cmd)) return true;

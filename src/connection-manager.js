@@ -4,6 +4,9 @@
 
 const crypto = require("crypto");
 const { EventEmitter } = require("events");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
+const execFileAsync = promisify(execFile);
 
 class ConnectionManager extends EventEmitter {
   constructor(directTransport, obfuscatedTransport, store) {
@@ -139,10 +142,6 @@ class ConnectionManager extends EventEmitter {
 
   async _getNetworkCacheKey() {
     try {
-      const { execFile } = require("child_process");
-      const { promisify } = require("util");
-      const execFileAsync = promisify(execFile);
-
       let gateway = null;
       if (process.platform === "darwin") {
         const { stdout } = await execFileAsync("/sbin/route", ["-n", "get", "default"]);

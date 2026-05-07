@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, clipboard, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, clipboard, shell, session } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const StoreModule = require("electron-store");
@@ -182,29 +182,6 @@ function updateWeeklyStats(type) {
 
 // 60-second interval to increment timeProtected while VPN is connected
 let _weeklyTimeInterval = null;
-
-// SECURITY FIX: Track all timers and intervals for proper cleanup
-const _activeTimers = new Set();
-
-function createTrackedInterval(fn, delay) {
-  const id = setInterval(fn, delay);
-  _activeTimers.add(id);
-  return id;
-}
-
-function createTrackedTimeout(fn, delay) {
-  const id = setTimeout(fn, delay);
-  _activeTimers.add(id);
-  return id;
-}
-
-function clearAllTrackedTimers() {
-  for (const id of _activeTimers) {
-    clearInterval(id);
-    clearTimeout(id);
-  }
-  _activeTimers.clear();
-}
 
 // ── Security Engine Events ────────────────────
 

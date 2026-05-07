@@ -6,6 +6,7 @@ const Routes = require("./routes");
 const Dns = require("./dns");
 const Monitor = require("./monitor");
 const { elevatedBatch } = require("./elevation");
+const { sanitize } = require("./util/sanitize");
 
 // Shadowsocks AEAD client — local SOCKS5 proxy tunneling through Outline VPS
 // Implements chacha20-ietf-poly1305 and aes-256-gcm AEAD ciphers
@@ -213,7 +214,11 @@ class VpnManager extends EventEmitter {
   // Parse ss:// URL into components
   _parseAccessUrl(url) {
     // Format: ss://base64(method:password)@host:port/?outline=1
-    const ssMatch = url.match(/^ss:\/\/([^@]+)@([^:]+):(\d+)/);
+    // Supports IPv6 addresses in brackets: ss://...@[2001:db8::1]:8388
+    let ssMatch = url.match(/^ss:\/\/([^@]+)@\[([^\]]+)\]:(\d+)/);
+    if (!ssMatch) {
+      ssMatch = url.match(/^ss:\/\/([^@]+)@([^:]+):(\d+)/);
+    }
     if (!ssMatch) throw new Error("Invalid ss:// URL");
 
     const decoded = Buffer.from(ssMatch[1], "base64").toString("utf8");
@@ -225,7 +230,10 @@ class VpnManager extends EventEmitter {
     const port = parseInt(ssMatch[3], 10);
 
     // Reject loopback/private hosts to prevent VPN redirect attacks
-    if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.0\.0\.0|localhost$)/i.test(host)) {
+    if (
+      /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|0\.0\.0\.0|localhost$)/i.test(host) ||
+      /^(::1|fc[0-9a-f]*:|fd[0-9a-f]*:|fe80:)/i.test(host)
+    ) {
       throw new Error("VPN host must be a public address");
     }
 

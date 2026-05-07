@@ -1,7 +1,7 @@
 const { execFile } = require("child_process");
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
-const { elevatedExec, elevatedBatch } = require("./elevation");
+const { elevatedExec } = require("./elevation");
 
 const TUNNEL_DNS = ["9.9.9.9", "1.1.1.1"];
 const STRICT_IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/;
