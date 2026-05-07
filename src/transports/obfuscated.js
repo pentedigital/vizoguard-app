@@ -304,7 +304,6 @@ class ObfuscatedTransport extends EventEmitter {
         ]
       },
       route: {
-        auto_detect_interface: true,
         final: "proxy",
         rules: [
           // CRITICAL: Route VPN server IP directly — prevents routing loop

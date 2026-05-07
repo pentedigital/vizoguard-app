@@ -1,29 +1,49 @@
 const crypto = require("crypto");
+const Store = require("electron-store");
 
 // Must match backend LICENSE_RESPONSE_SECRET
-// In production this is embedded at build time; for dev it defaults to empty (verification skipped)
+// In production this MUST be set via build-time env var; verification is mandatory
 const SHARED_SECRET = process.env.VIZOGUARD_LICENSE_SECRET || "";
 
 const MAX_AGE_SECONDS = 5 * 60; // 5 minutes
 const NONCE_HISTORY_SIZE = 100;
 
 let seenNonces = [];
+let nonceStore = null;
+
+function _getNonceStore() {
+  if (!nonceStore) {
+    try {
+      nonceStore = new Store({ name: "license-nonces", encryptionKey: "vizoguard-nonce-v1" });
+      const stored = nonceStore.get("seenNonces");
+      if (Array.isArray(stored)) seenNonces = stored;
+    } catch {
+      // Fallback to in-memory only
+    }
+  }
+  return nonceStore;
+}
+
+function _persistNonces() {
+  const store = _getNonceStore();
+  if (store) {
+    try { store.set("seenNonces", seenNonces); } catch {}
+  }
+}
 
 function verifyLicenseResponse(response) {
   if (!response || typeof response !== "object") return false;
 
-  // If no signature present and no secret configured, skip verification (backward compat)
   if (!response.sig) {
     if (SHARED_SECRET) {
       console.warn("[license-verify] Response missing signature but secret is configured");
       return false;
     }
-    return true;
+    return true; // Backward compat when no secret configured
   }
 
   if (!SHARED_SECRET) {
-    // Signature present but no secret configured — can't verify
-    console.warn("[license-verify] Response signed but no secret configured");
+    console.warn("[license-verify] Response signed but no secret configured — rejecting");
     return false;
   }
 
@@ -51,6 +71,7 @@ function verifyLicenseResponse(response) {
   if (seenNonces.length > NONCE_HISTORY_SIZE) {
     seenNonces = seenNonces.slice(-NONCE_HISTORY_SIZE);
   }
+  _persistNonces();
 
   // Verify HMAC
   const sigPayload = `${response.valid}|${response.status || ""}|${response.expires || ""}|${response.iat}|${response.nonce}`;

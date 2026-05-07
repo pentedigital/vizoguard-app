@@ -35,8 +35,13 @@ class DirectTransport extends EventEmitter {
     this._vpn.on("disconnected", this._onDisconnected);
     this._vpn.on("error", this._onError);
 
-    await this._vpn.connect();
-    this._running = this._vpn.isConnected;
+    try {
+      await this._vpn.connect();
+      this._running = this._vpn.isConnected;
+    } catch (err) {
+      this._removeVpnListeners();
+      throw err;
+    }
   }
 
   async stop() {

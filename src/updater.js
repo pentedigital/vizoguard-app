@@ -229,7 +229,15 @@ class Updater extends EventEmitter {
   }
 
   check() {
-    autoUpdater.checkForUpdates();
+    try {
+      autoUpdater.checkForUpdates().catch((err) => {
+        console.error("Update check failed:", err.message);
+        this.emit("error", err);
+      });
+    } catch (err) {
+      console.error("Update check failed:", err.message);
+      this.emit("error", err);
+    }
   }
 
   install() {
