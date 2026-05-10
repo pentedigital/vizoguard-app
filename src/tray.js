@@ -18,8 +18,12 @@ function createTray(callbacks) {
   return tray;
 }
 
+let _lastTrayActive = null;
+
 function updateMenu(isActive, callbacks) {
   if (!tray) return;
+  if (_lastTrayActive === isActive) return; // Skip rebuild if state unchanged
+  _lastTrayActive = isActive;
 
   const iconName = isActive
     ? (process.platform === "darwin" ? "tray-activeTemplate.png" : "tray-active.png")

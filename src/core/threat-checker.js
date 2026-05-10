@@ -27,6 +27,23 @@ class ThreatChecker extends EventEmitter {
       ".rpm", ".app", ".jar", ".py", ".sh",
     ];
     this._loadBlocklist();
+    // Periodic cache sweep to prevent unbounded memory growth from expired entries
+    this._cacheSweepTimer = setInterval(() => this._sweepCache(), 5 * 60 * 1000);
+    if (this._cacheSweepTimer.unref) this._cacheSweepTimer.unref();
+  }
+
+  _sweepCache() {
+    const now = Date.now();
+    let removed = 0;
+    for (const [url, entry] of this._cache) {
+      if (now - entry.time > CACHE_TTL) {
+        this._cache.delete(url);
+        removed++;
+      }
+    }
+    if (removed > 0 && process.env.NODE_ENV !== 'test') {
+      console.log(`[threat-checker] Cache sweep: removed ${removed} expired entries`);
+    }
   }
 
   _loadBlocklist() {
@@ -69,6 +86,10 @@ class ThreatChecker extends EventEmitter {
       clearInterval(this._updateTimer);
       clearTimeout(this._updateTimer);
       this._updateTimer = null;
+    }
+    if (this._cacheSweepTimer) {
+      clearInterval(this._cacheSweepTimer);
+      this._cacheSweepTimer = null;
     }
   }
 

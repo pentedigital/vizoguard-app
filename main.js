@@ -171,6 +171,7 @@ const trayCallbacks = {
   },
   quit: async () => {
     // Graceful shutdown
+    flushStatsBuffers();
     license.stopPeriodicCheck();
     connectionMonitor.stop();
     immuneSystem.stop();
@@ -188,33 +189,78 @@ const trayCallbacks = {
 // ── Connection History ────────────────────────
 
 // Connection history — stored LOCALLY only, never sent to servers
+// Buffered in memory and debounced to disk to prevent excessive store I/O
+let _connectionHistoryBuf = null;
+let _historyDebounceTimer = null;
+const HISTORY_MAX = 100;
+const HISTORY_DEBOUNCE_MS = 5000;
+
 function logConnection(action, details = {}) {
-  const history = store.get('connectionHistory', []);
-  history.unshift({
+  if (!_connectionHistoryBuf) {
+    _connectionHistoryBuf = store.get('connectionHistory', []);
+  }
+  _connectionHistoryBuf.push({
     timestamp: new Date().toISOString(),
     action, // 'connected', 'disconnected', 'threat_blocked', 'error'
     ...details
   });
-  // Keep last 100 entries
-  if (history.length > 100) history.length = 100;
-  store.set('connectionHistory', history);
+  // Keep last 100 entries (drop oldest from front)
+  if (_connectionHistoryBuf.length > HISTORY_MAX) {
+    _connectionHistoryBuf = _connectionHistoryBuf.slice(-HISTORY_MAX);
+  }
+  if (_historyDebounceTimer) clearTimeout(_historyDebounceTimer);
+  _historyDebounceTimer = setTimeout(() => {
+    if (_connectionHistoryBuf) {
+      store.set('connectionHistory', _connectionHistoryBuf);
+      _connectionHistoryBuf = null;
+    }
+    _historyDebounceTimer = null;
+  }, HISTORY_DEBOUNCE_MS);
 }
 
 // ── Weekly Stats ──────────────────────────────
 
-function updateWeeklyStats(type) {
-  const key = 'weeklyStats';
-  let stats = store.get(key, { threats: 0, connections: 0, timeProtected: 0, weekStart: new Date().toISOString() });
+// Buffered in memory and debounced to disk
+let _weeklyStatsBuf = null;
+let _weeklyStatsDebounceTimer = null;
+const WEEKLY_STATS_DEBOUNCE_MS = 5000;
 
-  // Reset if more than 7 days old — fall through to process current increment
-  if (new Date() - new Date(stats.weekStart) > 7 * 24 * 60 * 60 * 1000) {
-    stats = { threats: 0, connections: 0, timeProtected: 0, weekStart: new Date().toISOString() };
+function updateWeeklyStats(type) {
+  if (!_weeklyStatsBuf) {
+    _weeklyStatsBuf = store.get('weeklyStats', { threats: 0, connections: 0, timeProtected: 0, weekStart: new Date().toISOString() });
   }
 
-  if (type === 'threat') stats.threats++;
-  if (type === 'connection') stats.connections++;
-  if (type === 'time') stats.timeProtected += 60; // add 60 seconds
-  store.set(key, stats);
+  // Reset if more than 7 days old — fall through to process current increment
+  if (new Date() - new Date(_weeklyStatsBuf.weekStart) > 7 * 24 * 60 * 60 * 1000) {
+    _weeklyStatsBuf = { threats: 0, connections: 0, timeProtected: 0, weekStart: new Date().toISOString() };
+  }
+
+  if (type === 'threat') _weeklyStatsBuf.threats++;
+  if (type === 'connection') _weeklyStatsBuf.connections++;
+  if (type === 'time') _weeklyStatsBuf.timeProtected += 60; // add 60 seconds
+
+  if (_weeklyStatsDebounceTimer) clearTimeout(_weeklyStatsDebounceTimer);
+  _weeklyStatsDebounceTimer = setTimeout(() => {
+    if (_weeklyStatsBuf) {
+      store.set('weeklyStats', _weeklyStatsBuf);
+      _weeklyStatsBuf = null;
+    }
+    _weeklyStatsDebounceTimer = null;
+  }, WEEKLY_STATS_DEBOUNCE_MS);
+}
+
+// Flush buffers on graceful quit
+function flushStatsBuffers() {
+  if (_connectionHistoryBuf) {
+    store.set('connectionHistory', _connectionHistoryBuf);
+    _connectionHistoryBuf = null;
+  }
+  if (_weeklyStatsBuf) {
+    store.set('weeklyStats', _weeklyStatsBuf);
+    _weeklyStatsBuf = null;
+  }
+  if (_historyDebounceTimer) { clearTimeout(_historyDebounceTimer); _historyDebounceTimer = null; }
+  if (_weeklyStatsDebounceTimer) { clearTimeout(_weeklyStatsDebounceTimer); _weeklyStatsDebounceTimer = null; }
 }
 
 // 60-second interval to increment timeProtected while VPN is connected
