@@ -1,6 +1,7 @@
 // Connection Manager — adaptive transport selection with fallback
 // Tries direct Shadowsocks first, falls back to obfuscated (sing-box VLESS+WS+TLS)
 // Caches working mode per network (gateway IP hash)
+// Integrates kill switch (firewall) and auto-reconnection
 
 const crypto = require("crypto");
 const { EventEmitter } = require("events");
@@ -8,15 +9,25 @@ const { execFile } = require("child_process");
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
 
+// Auto-reconnect config
+const RECONNECT_BASE_DELAY = 1000;  // 1s
+const RECONNECT_MAX_DELAY = 30000;  // 30s cap
+const RECONNECT_MAX_ATTEMPTS = 5;
+
 class ConnectionManager extends EventEmitter {
-  constructor(directTransport, obfuscatedTransport, store) {
+  constructor(directTransport, obfuscatedTransport, store, firewall) {
     super();
     this._direct = directTransport;
     this._obfuscated = obfuscatedTransport;
     this._store = store;
+    this._firewall = firewall || null;
     this._active = null; // currently active transport
     this._connecting = false;
     this._aborted = false;
+    this._reconnecting = false;
+    this._reconnectAttempt = 0;
+    this._reconnectTimer = null;
+    this._vpnServerIp = null;
   }
 
   get isConnected() {
@@ -25,6 +36,10 @@ class ConnectionManager extends EventEmitter {
 
   get activeMode() {
     return this._active ? this._active.name : null;
+  }
+
+  get isReconnecting() {
+    return this._reconnecting;
   }
 
   // Main connect — try direct, fallback to obfuscated, cache result
@@ -95,19 +110,113 @@ class ConnectionManager extends EventEmitter {
 
   async disconnect() {
     this._aborted = true; // cancel any in-progress connect
+    this._cancelReconnect();
+
     if (this._active) {
       const transport = this._active;
       this._active = null;
       await transport.stop();
     }
+
+    // Deactivate kill switch on intentional disconnect
+    await this._deactivateFirewall();
   }
 
   // Emergency rollback — force-stop everything
   async emergencyStop() {
+    this._cancelReconnect();
     try { await this._direct.stop(); } catch {}
     try { await this._obfuscated.stop(); } catch {}
     this._active = null;
+    await this._deactivateFirewall();
   }
+
+  // ── Kill Switch ────────────────────────────────
+
+  async _activateFirewall() {
+    if (!this._firewall || !this._vpnServerIp) return;
+    const killSwitchEnabled = this._store.get("killSwitch", true);
+    if (!killSwitchEnabled) return;
+
+    try {
+      await this._firewall.activate(this._vpnServerIp);
+    } catch (e) {
+      console.error("Kill switch activation failed:", e.message);
+      this.emit("warning", `Kill switch unavailable: ${e.message}`);
+    }
+  }
+
+  async _deactivateFirewall() {
+    if (!this._firewall || !this._firewall.isActive) return;
+
+    try {
+      await this._firewall.deactivate();
+    } catch (e) {
+      console.error("Kill switch deactivation failed:", e.message);
+    }
+  }
+
+  // ── Auto-Reconnect ─────────────────────────────
+
+  _scheduleReconnect() {
+    if (this._aborted || this._reconnecting) return;
+    if (this._reconnectAttempt >= RECONNECT_MAX_ATTEMPTS) {
+      console.log(`Auto-reconnect: max attempts (${RECONNECT_MAX_ATTEMPTS}) reached — giving up`);
+      this._reconnecting = false;
+      this._reconnectAttempt = 0;
+      this.emit("reconnect-failed");
+      // Deactivate kill switch since we can't reconnect
+      this._deactivateFirewall().catch(() => {});
+      return;
+    }
+
+    this._reconnecting = true;
+    this._reconnectAttempt++;
+    // Exponential backoff with jitter: delay * 2^attempt + random(0-500ms)
+    const delay = Math.min(
+      RECONNECT_BASE_DELAY * Math.pow(2, this._reconnectAttempt - 1),
+      RECONNECT_MAX_DELAY
+    ) + Math.random() * 500;
+
+    console.log(`Auto-reconnect: attempt ${this._reconnectAttempt}/${RECONNECT_MAX_ATTEMPTS} in ${Math.round(delay)}ms`);
+    this.emit("reconnecting", { attempt: this._reconnectAttempt, maxAttempts: RECONNECT_MAX_ATTEMPTS, delay });
+
+    this._reconnectTimer = setTimeout(async () => {
+      this._reconnectTimer = null;
+      if (this._aborted) {
+        this._reconnecting = false;
+        return;
+      }
+
+      try {
+        await this.connect();
+        if (this.isConnected) {
+          console.log(`Auto-reconnect: succeeded on attempt ${this._reconnectAttempt}`);
+          this._reconnecting = false;
+          this._reconnectAttempt = 0;
+          this.emit("reconnected");
+        } else {
+          this._reconnecting = false;
+          this._scheduleReconnect();
+        }
+      } catch (e) {
+        console.log(`Auto-reconnect: attempt ${this._reconnectAttempt} failed: ${e.message}`);
+        this._reconnecting = false;
+        this._scheduleReconnect();
+      }
+    }, delay);
+  }
+
+  _cancelReconnect() {
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+    this._reconnecting = false;
+    this._reconnectAttempt = 0;
+  }
+
+  // ── Transport Management ──────────────────────
 
   async _startTransport(transport) {
     // Wire up events
@@ -116,7 +225,15 @@ class ConnectionManager extends EventEmitter {
       this._active = null;
       transport.removeListener("error", onError);
       transport.removeListener("disconnected", onDisconnected);
-      this.emit("disconnected");
+
+      // If not intentionally aborted, attempt auto-reconnect
+      // Keep kill switch active during reconnect to prevent leaks
+      if (!this._aborted) {
+        this.emit("disconnected");
+        this._scheduleReconnect();
+      } else {
+        this.emit("disconnected");
+      }
     };
 
     transport.on("error", onError);
@@ -132,12 +249,29 @@ class ConnectionManager extends EventEmitter {
         return;
       }
       this._active = transport;
+
+      // Extract VPN server IP for kill switch
+      this._vpnServerIp = this._extractVpnServerIp();
+
+      // Activate kill switch after successful connection
+      await this._activateFirewall();
+
+      // Reset reconnect counter on successful connect
+      this._reconnectAttempt = 0;
+      this._reconnecting = false;
+
       this.emit("connected", { mode: transport.name });
     } catch (e) {
       transport.removeListener("error", onError);
       transport.removeListener("disconnected", onDisconnected);
       throw e;
     }
+  }
+
+  _extractVpnServerIp() {
+    const accessUrl = this._store.get("license.vpnAccessUrl") || "";
+    const match = accessUrl.match(/@([^:]+):/);
+    return match ? match[1] : null;
   }
 
   async _getNetworkCacheKey() {

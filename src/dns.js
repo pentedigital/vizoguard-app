@@ -58,13 +58,18 @@ class Dns {
       assertServiceName(this._service);
       return [
         `/usr/sbin/networksetup -setdnsservers "${this._service}" ${TUNNEL_DNS.join(" ")}`,
-        `/usr/sbin/networksetup -setv6off "${this._service}"`
+        `/usr/sbin/networksetup -setv6off "${this._service}"`,
+        // Flush DNS cache to prevent stale entries leaking pre-VPN destinations
+        `dscacheutil -flushcache || true`,
+        `killall -HUP mDNSResponder 2>/dev/null || true`
       ];
     } else {
       return [
         `netsh interface ip set dns "vizoguard" static ${TUNNEL_DNS[0]}`,
         `netsh interface ip add dns "vizoguard" ${TUNNEL_DNS[1]} index=2`,
-        `reg add "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters" /v DisabledComponents /t REG_DWORD /d 0xFF /f`
+        `reg add "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters" /v DisabledComponents /t REG_DWORD /d 0xFF /f`,
+        // Flush DNS cache to prevent stale entries leaking pre-VPN destinations
+        `ipconfig /flushdns`
       ];
     }
   }
@@ -86,11 +91,16 @@ class Dns {
           cmds.push(`/usr/sbin/networksetup -setv6automatic "${this._service}"`);
         }
       }
+      // Flush DNS cache to clear tunnel DNS entries after disconnect
+      cmds.push(`dscacheutil -flushcache || true`);
+      cmds.push(`killall -HUP mDNSResponder 2>/dev/null || true`);
     } else {
       // Windows: DNS was on TUN interface, no restore needed. Just re-enable IPv6.
       if (this._ipv6Disabled) {
         cmds.push(`reg add "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Tcpip6\\Parameters" /v DisabledComponents /t REG_DWORD /d 0x0 /f`);
       }
+      // Flush DNS cache to clear tunnel DNS entries after disconnect
+      cmds.push(`ipconfig /flushdns`);
     }
     return cmds;
   }

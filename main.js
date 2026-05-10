@@ -11,6 +11,7 @@ const ConnectionManager = require("./src/connection-manager");
 const { ThreatChecker, ConnectionMonitor, SecurityProxy, ImmuneSystem, PrivacyIntelligence } = require("./src/core");
 const { createTray, updateMenu, destroyTray } = require("./src/tray");
 const Updater = require("./src/updater");
+const Firewall = require("./src/firewall");
 const { apiCall } = require("./src/api");
 const { shutdownDaemon } = require("./src/elevation");
 
@@ -56,7 +57,8 @@ const immuneSystem = new ImmuneSystem(app.isPackaged ? path.dirname(app.getPath(
 const vpn = new VpnManager(store);
 const directTransport = new DirectTransport(vpn);
 const obfuscatedTransport = new ObfuscatedTransport(store);
-const connectionManager = new ConnectionManager(directTransport, obfuscatedTransport, store);
+const firewall = new Firewall();
+const connectionManager = new ConnectionManager(directTransport, obfuscatedTransport, store, firewall);
 const updater = new Updater();
 
 let mainWindow = null;
@@ -91,6 +93,27 @@ function createWindow(page) {
 
   mainWindow.loadFile(path.join(__dirname, "ui", page));
 
+  // SECURITY: Block navigation to external URLs — only allow local file:// pages
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith("file://")) {
+      event.preventDefault();
+      console.warn("Blocked navigation to:", url);
+    }
+  });
+
+  // SECURITY: Block new window creation (window.open, target="_blank")
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    // Allow opening vizoguard.com links in default browser
+    try {
+      const parsed = new URL(url);
+      const allowedHosts = ["vizoguard.com", "www.vizoguard.com"];
+      if (parsed.protocol === "https:" && allowedHosts.includes(parsed.hostname)) {
+        shell.openExternal(url);
+      }
+    } catch {}
+    return { action: "deny" };
+  });
+
   mainWindow.on("close", (e) => {
     e.preventDefault();
     mainWindow.hide();
@@ -111,6 +134,18 @@ function showPage(page) {
 function sendToRenderer(channel, data) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, data);
+  }
+}
+
+// SECURITY: Validate IPC sender is a legitimate local page
+function isValidSender(event) {
+  try {
+    const url = event.senderFrame && event.senderFrame.url;
+    if (!url) return false;
+    // Allow file:// protocol (local UI pages) and devtools
+    return url.startsWith("file://") || url.startsWith("devtools://");
+  } catch {
+    return false;
   }
 }
 
@@ -140,7 +175,9 @@ const trayCallbacks = {
     connectionMonitor.stop();
     immuneSystem.stop();
     securityProxy.stop();
+    await connectionManager.disconnect().catch(() => {});
     await vpn.disconnect().catch(() => {});
+    await firewall.deactivate().catch(() => {});
     await shutdownDaemon().catch(() => {});
     destroyTray();
     mainWindow = null;
@@ -254,6 +291,19 @@ connectionManager.on("error", (err) => {
   sendToRenderer("vpn:error", { message: safeMsg });
 });
 
+connectionManager.on("reconnecting", (info) => {
+  sendToRenderer("vpn:state", { connected: false, reconnecting: true, attempt: info.attempt, maxAttempts: info.maxAttempts });
+});
+
+connectionManager.on("reconnected", () => {
+  sendToRenderer("vpn:state", { connected: true, reconnected: true });
+});
+
+connectionManager.on("reconnect-failed", () => {
+  sendToRenderer("vpn:error", { message: "Unable to reconnect after multiple attempts. Please reconnect manually." });
+  sendToRenderer("vpn:state", { connected: false, reconnecting: false });
+});
+
 // ── Updater Events ────────────────────────────
 
 updater.on("downloaded", (info) => {
@@ -273,6 +323,18 @@ updater.on("error", (err) => {
 });
 
 // ── IPC Handlers ──────────────────────────────
+
+// SECURITY: Wrap ipcMain.handle with sender validation
+const _originalHandle = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (channel, handler) => {
+  _originalHandle(channel, (event, ...args) => {
+    if (!isValidSender(event)) {
+      console.warn(`Blocked IPC from invalid sender: ${channel}`);
+      return { success: false, error: "Unauthorized" };
+    }
+    return handler(event, ...args);
+  });
+};
 
 ipcMain.handle("license:activate", async (_event, key) => {
   if (typeof key !== "string" || key.length > 128) {
@@ -577,7 +639,7 @@ ipcMain.handle("settings:get", () => ({
   autoConnect: store.get('autoConnect', false),
   notifications: store.get('notifications', true),
 }));
-const ALLOWED_SETTINGS = ['autoConnect', 'notifications', 'connectionMode', 'ui.engineExpanded', 'ui.settingsOpen'];
+const ALLOWED_SETTINGS = ['autoConnect', 'notifications', 'connectionMode', 'killSwitch', 'ui.engineExpanded', 'ui.settingsOpen'];
 ipcMain.handle("settings:get-one", (_e, key) => {
   if (!ALLOWED_SETTINGS.includes(key)) return undefined;
   return store.get(key);
@@ -617,6 +679,7 @@ async function startSecurityEngine() {
   }
   connectionMonitor.start();
   immuneSystem.start();
+  threatChecker.startAutoUpdate();
   console.log("Security engine started");
 }
 
@@ -632,6 +695,7 @@ license.onStatusChange((status) => {
     securityProxy.stop();
     connectionMonitor.stop();
     immuneSystem.stop();
+    threatChecker.stopAutoUpdate();
     _engineStarted = false;
     connectionManager.disconnect().catch(() => {});
   } else {
@@ -647,6 +711,7 @@ process.on('uncaughtException', (err) => {
   console.error("Uncaught exception:", err);
   try { connectionManager.emergencyStop().catch(() => {}); } catch {}
   try { vpn._rollback().catch(() => {}); } catch {}
+  try { firewall.deactivate().catch(() => {}); } catch {}
   sendToRenderer("vpn:error", { message: err.message || "Unexpected error" });
   sendToRenderer("vpn:state", { connected: false });
   // Node.js docs: process is in undefined state after uncaughtException.
@@ -674,16 +739,17 @@ app.whenReady().then(async () => {
     });
   });
 
-  // Crash recovery: stop any leftover transports from previous session
+  // Crash recovery: stop any leftover transports and firewall rules from previous session
   connectionManager.emergencyStop().catch(() => {});
   vpn._rollback().catch(() => {});
+  firewall.deactivate().catch(() => {});
 
   // Clean up stale temp files from crash/force-quit and register exit handler
   require("./src/util/temp-cleanup").registerTempCleanup();
 
   // Clean up on exit
-  process.on('SIGTERM', () => { connectionManager.emergencyStop().catch(() => {}); vpn._rollback().catch(() => {}).finally(() => { shutdownDaemon().catch(() => {}); process.exit(0); }); });
-  process.on('SIGINT', () => { connectionManager.emergencyStop().catch(() => {}); vpn._rollback().catch(() => {}).finally(() => { shutdownDaemon().catch(() => {}); process.exit(0); }); });
+  process.on('SIGTERM', () => { connectionManager.emergencyStop().catch(() => {}); vpn._rollback().catch(() => {}); firewall.deactivate().catch(() => {}).finally(() => { shutdownDaemon().catch(() => {}); process.exit(0); }); });
+  process.on('SIGINT', () => { connectionManager.emergencyStop().catch(() => {}); vpn._rollback().catch(() => {}); firewall.deactivate().catch(() => {}).finally(() => { shutdownDaemon().catch(() => {}); process.exit(0); }); });
 
   if (process.platform === "darwin") {
     app.dock.hide();

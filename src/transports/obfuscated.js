@@ -2,7 +2,7 @@
 // Used in censored networks (UAE, China, Iran, etc.)
 // Traffic looks like normal HTTPS to vizoguard.com
 
-const { execFile } = require("child_process");
+const { execFile, execFileSync } = require("child_process");
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
 const dns = require("dns");

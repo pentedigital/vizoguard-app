@@ -49,7 +49,20 @@ class LicenseManager {
     const lastCheck = this.store.get("license.lastSuccessfulCheck");
     if (!lastCheck) return false;
     const elapsed = Date.now() - new Date(lastCheck).getTime();
-    if (elapsed < 0) return false; // clock skew
+    if (elapsed < 0) return false; // forward clock skew — clock was set ahead
+
+    // Detect backward clock manipulation: compare wall-clock elapsed with
+    // process uptime. If the process has been running longer than wall-clock
+    // suggests, the clock was set backward.
+    const serverIat = this.store.get("license.serverIat");
+    if (serverIat) {
+      const serverElapsed = Date.now() - serverIat * 1000;
+      // If server issued the response >grace period ago but wall clock says
+      // less time has passed, clock was wound backward
+      if (serverElapsed > GRACE_PERIOD_MS) return false;
+      if (serverElapsed < 0) return false; // clock before server time
+    }
+
     return elapsed < GRACE_PERIOD_MS;
   }
 
@@ -170,6 +183,8 @@ class LicenseManager {
       this.store.set("license.status", result.status);
       this.store.set("license.expires", result.expires);
       this.store.set("license.responseHash", this._hashResponse(result));
+      // Store server-issued timestamp for grace period clock manipulation detection
+      if (result.iat) this.store.set("license.serverIat", result.iat);
 
       // Clear stale VPN URL on status recovery
       if ((previousStatus === "suspended" || previousStatus === "expired") && result.status === "active") {

@@ -29,9 +29,6 @@ class ThreatChecker extends EventEmitter {
     this._loadBlocklist();
   }
 
-  // Blocklist is loaded once at startup from the local file.
-  // Updates are delivered via app updates (electron-updater).
-  // A future enhancement will add periodic API-based blocklist refresh.
   _loadBlocklist() {
     const blocklistPath = path.join(this.dataDir, "malicious-domains.txt");
     try {
@@ -47,6 +44,75 @@ class ThreatChecker extends EventEmitter {
       }
     } catch (e) {
       console.error("Failed to load blocklist:", e.message);
+    }
+  }
+
+  // Periodic blocklist update — fetches from server every 24 hours
+  startAutoUpdate() {
+    if (this._updateTimer) return;
+    // Initial update after 60 seconds (don't block startup)
+    this._updateTimer = setTimeout(() => {
+      this._fetchBlocklist();
+      // Then every 24 hours
+      this._updateTimer = setInterval(() => this._fetchBlocklist(), 24 * 60 * 60 * 1000);
+    }, 60000);
+  }
+
+  stopAutoUpdate() {
+    if (this._updateTimer) {
+      clearInterval(this._updateTimer);
+      clearTimeout(this._updateTimer);
+      this._updateTimer = null;
+    }
+  }
+
+  async _fetchBlocklist() {
+    const https = require("https");
+    const blocklistPath = path.join(this.dataDir, "malicious-domains.txt");
+    const tmpPath = blocklistPath + ".tmp";
+
+    try {
+      const data = await new Promise((resolve, reject) => {
+        const req = https.get("https://vizoguard.com/api/blocklist", (res) => {
+          if (res.statusCode !== 200) {
+            reject(new Error(`Blocklist fetch: HTTP ${res.statusCode}`));
+            res.resume();
+            return;
+          }
+          let body = "";
+          res.on("data", (chunk) => (body += chunk));
+          res.on("end", () => resolve(body));
+        });
+        req.setTimeout(15000, () => { req.destroy(new Error("Blocklist fetch timeout")); });
+        req.on("error", reject);
+      });
+
+      // Validate: must have at least a few domains, each line a valid domain
+      const lines = data.split("\n").filter(l => l.trim() && !l.startsWith("#"));
+      if (lines.length < 10) {
+        console.warn("Blocklist update: too few entries, skipping");
+        return;
+      }
+
+      // Write to temp file, then atomically rename
+      fs.writeFileSync(tmpPath, data);
+      fs.renameSync(tmpPath, blocklistPath);
+
+      // Reload in-memory blocklist
+      this._blocklist.clear();
+      lines.forEach((line) => {
+        const domain = line.trim().toLowerCase();
+        if (domain) this._blocklist.add(domain);
+      });
+
+      // Clear URL cache so new blocklist entries take effect
+      this._cache.clear();
+
+      console.log(`Blocklist updated: ${this._blocklist.size} domains`);
+    } catch (e) {
+      // Non-fatal — keep using existing blocklist
+      console.error("Blocklist auto-update failed:", e.message);
+      try { fs.unlinkSync(tmpPath); } catch {}
     }
   }
 
