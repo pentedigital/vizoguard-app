@@ -5,7 +5,8 @@
 - Cross-platform: `src/platform/` — darwin.js, win32.js, index.js (auto-selects)
 - Core modules: `src/core/` — threat-checker, immune-system, connection-monitor, proxy (barrel export: `src/core/index.js`)
 - VPN client: `src/vpn.js` — Shadowsocks/Outline protocol via `ss://` URLs
-- Transport layer: `src/connection-manager.js` (auto/direct/obfuscated mode selection), `src/transports/direct.js` (SS+tun2socks), `src/transports/obfuscated.js` (sing-box VLESS+WS+TLS)
+- Transport layer: `src/connection-manager.js` (auto/direct/obfuscated mode selection + auto-reconnect + kill switch integration), `src/transports/direct.js` (SS+tun2socks), `src/transports/obfuscated.js` (sing-box VLESS+WS+TLS)
+- Kill switch: `src/firewall.js` — OS-level firewall (macOS PF, Windows netsh advfirewall) that blocks traffic outside VPN; persists on crash
 - License management: `src/license.js`
 - Auto-updater: `src/updater.js` — GitHub Releases feed (HTTPS)
 - API client: `src/api.js` — all backend calls, base URL: `https://vizoguard.com/api`, exponential backoff retry (2 retries, 1s/2s for 5xx/network errors)
@@ -50,12 +51,17 @@
 
 ## Security Rules
 - Context isolation enforced — all renderer communication via preload.js IPC bridge
+- IPC sender validation — all `ipcMain.handle` calls verify `senderFrame.url` is `file://` or `devtools://`
+- Navigation restriction — `will-navigate` blocked for non-`file://` URLs; `setWindowOpenHandler` blocks `window.open`
 - IPC event listeners cleaned up on page load (`removeAllListeners` before `on`) to prevent accumulation
 - VPN access URLs contain auth credentials — never log or expose
 - Clipboard auto-clears ss:// URLs after 30 seconds (`clipboardWriteSensitive` in main.js)
 - `openExternal` restricted to vizoguard.com, getoutline.org, and exact `mailto:support@vizoguard.com`
 - CONNECT tunnel port-whitelisted to 80/443 only — loopback/private IPs blocked to prevent SSRF
 - VPN host validated on connect — rejects loopback/private IP ranges
+- Kill switch (`src/firewall.js`): OS-level firewall blocks traffic outside VPN; activated on connect, deactivated on disconnect/quit/crash
+- DNS cache flushed on connect and disconnect (macOS: `dscacheutil -flushcache` + `mDNSResponder`; Windows: `ipconfig /flushdns`)
+- Grace period hardened against clock manipulation — stores server `iat` timestamp and detects backward clock jumps
 
 ## Security Improvements (2026-04-12)
 - **Code signature verification**: Auto-updater (`src/updater.js`) now verifies update signatures and prevents downgrade attacks via minimum version check
@@ -63,6 +69,15 @@
 - **Memory leak fixes**: Proper cleanup for engine intervals with multiple destroy handlers (`main.js`)
 - **License validation**: Response structure validation and integrity hashing (`src/license.js`)
 - **AEAD health probes**: Shadowsocks handshake verification (not just TCP connect) in `src/vpn.js` `_performAeadHealthProbe()`
+
+## Security Improvements (2026-05-10)
+- **Kill switch**: OS-level firewall (`src/firewall.js`) using macOS PF anchors and Windows netsh advfirewall rules; persists if app crashes
+- **Auto-reconnect**: Exponential backoff (1s–30s, max 5 attempts) with UI events (`reconnecting`, `reconnected`, `reconnect-failed`)
+- **IPC hardening**: All `ipcMain.handle` calls wrapped with sender validation (`senderFrame.url` must be `file://`)
+- **Navigation restriction**: `will-navigate` and `setWindowOpenHandler` block navigation to non-local URLs
+- **DNS leak prevention**: DNS cache flushed on connect/disconnect; commands batched into existing elevated call
+- **Blocklist auto-update**: `ThreatChecker.startAutoUpdate()` fetches `/api/blocklist` every 24h; atomic file swap + cache clear
+- **Grace period hardening**: Server `iat` timestamp stored and checked to detect backward clock manipulation
 
 ## Commands
 - `npm install` — install dependencies
@@ -106,16 +121,17 @@ Apps will show:
 
 ## IPC Channels
 - `license:activate`, `license:status` — license management
-- `vpn:connect`, `vpn:disconnect`, `vpn:status`, `vpn:copyKey` — VPN control
+- `vpn:connect`, `vpn:disconnect`, `vpn:status`, `vpn:copyKey` — VPN control (renderer also receives `vpn:state` with `reconnecting`/`reconnected` fields)
 - `security:stats` — threat/connection counts
 - `update:install` — install pending update
 - `app:openExternal`, `app:minimize`, `app:close` — window controls
 
 ## Testing
-- Run all: `node --test test/*.test.js` — 140 tests, Node built-in test runner
+- Run all: `node --test test/*.test.js` — 264 tests, Node built-in test runner
 - Core tests: `test/core/` — mirrors `src/core/` structure, uses jest (`npx jest test/core/<module>.test.js`)
 - Transport/route/DNS tests: `test/*.test.js` — dns, routes, obfuscated transport
 - Critical path tests: `test/license.test.js` (29 tests), `test/api.test.js` (12 tests), `test/threat-checker.test.js` (24 tests), `test/connection-manager.test.js` (15 tests)
+- Security tests: `test/firewall.test.js` (7 tests), `test/connection-manager-reconnect.test.js` (8 tests), `test/dns-flush.test.js` (4 tests), `test/blocklist-update.test.js` (5 tests), `test/grace-period.test.js` (7 tests)
 - Electron mock: tests needing `require("electron")` use `Module._resolveFilename` override (`mock.module` needs Node 22+, we're on 20)
 - API mock: `test/api.test.js` monkey-patches `https.request` on the singleton; uses `mock.timers.enable()` for retry delay tests
 - License mock: `test/license.test.js` uses `require.cache` injection for apiCall + platform.getDeviceId — apiCall mock MUST use a delegating wrapper (`async (...args) => mockApiCall(...args)`) because license.js destructures at require time
@@ -153,6 +169,12 @@ Apps will show:
 - Windows `Start-Process -RedirectStandardOutput` and `-RedirectStandardError` cannot point to the same file — use separate `.log` and `.err` files
 - Obfuscated transport must resolve VLESS server DNS before launching sing-box — DNS queries get trapped by TUN once `auto_route` is active
 - `connection-manager.js` `emergencyStop()` kills both transports but only direct has route rollback via `vpn._rollback()` — obfuscated has its own `_ensureRouteRestored()`
+- Kill switch (`firewall.js`): macOS uses PF anchor `com.vizoguard.killswitch` (never touches `/etc/pf.conf`); Windows uses `Vizoguard-KillSwitch-*` named rules in netsh advfirewall
+- Kill switch deactivated on: crash recovery (startup), SIGTERM, SIGINT, quit, and manual disconnect — firewall rules must never persist after app exits
+- Auto-reconnect: `_aborted` flag prevents reconnect on intentional disconnect; kill switch stays active during reconnect attempts
+- ConnectionManager constructor now takes 4th param `firewall` — pass `null` in tests that don't need it
+- Blocklist auto-update endpoint: `GET /api/blocklist` — must return newline-separated domains, minimum 10 entries or update is rejected
+- IPC sender validation wraps `ipcMain.handle` at registration time — all handlers registered AFTER the wrapper are automatically validated
 
 ## Immune System v2 (Planned)
 - Design spec: `docs/superpowers/specs/2026-03-19-immune-system-layers-design.md`
