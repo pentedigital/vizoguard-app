@@ -143,8 +143,9 @@ class LicenseManager {
     try {
       const date = new Date(response.expires);
       if (isNaN(date.getTime())) return false;
-      // Expires should be in the future for active licenses
-      if (response.status === "active" && date < new Date()) return false;
+      // Note: do NOT check expires > now here — clock skew between client and
+      // server causes false rejections for active licenses. Expiry is checked
+      // separately by isExpired() and the server's status field is authoritative.
     } catch {
       return false;
     }

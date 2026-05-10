@@ -27,6 +27,7 @@ class ConnectionManager extends EventEmitter {
     this._reconnecting = false;
     this._reconnectAttempt = 0;
     this._reconnectTimer = null;
+    this._reconnectInFlight = false; // guards against double-timer race
     this._vpnServerIp = null;
   }
 
@@ -159,7 +160,7 @@ class ConnectionManager extends EventEmitter {
   // ── Auto-Reconnect ─────────────────────────────
 
   _scheduleReconnect() {
-    if (this._aborted || this._reconnecting) return;
+    if (this._aborted || this._reconnecting || this._reconnectInFlight) return;
     if (this._reconnectAttempt >= RECONNECT_MAX_ATTEMPTS) {
       console.log(`Auto-reconnect: max attempts (${RECONNECT_MAX_ATTEMPTS}) reached — giving up`);
       this._reconnecting = false;
@@ -183,13 +184,16 @@ class ConnectionManager extends EventEmitter {
 
     this._reconnectTimer = setTimeout(async () => {
       this._reconnectTimer = null;
+      this._reconnectInFlight = true; // prevent _scheduleReconnect re-entry during connect()
       if (this._aborted) {
         this._reconnecting = false;
+        this._reconnectInFlight = false;
         return;
       }
 
       try {
         await this.connect();
+        this._reconnectInFlight = false;
         if (this.isConnected) {
           console.log(`Auto-reconnect: succeeded on attempt ${this._reconnectAttempt}`);
           this._reconnecting = false;
@@ -200,6 +204,7 @@ class ConnectionManager extends EventEmitter {
           this._scheduleReconnect();
         }
       } catch (e) {
+        this._reconnectInFlight = false;
         console.log(`Auto-reconnect: attempt ${this._reconnectAttempt} failed: ${e.message}`);
         this._reconnecting = false;
         this._scheduleReconnect();
@@ -214,6 +219,7 @@ class ConnectionManager extends EventEmitter {
     }
     this._reconnecting = false;
     this._reconnectAttempt = 0;
+    this._reconnectInFlight = false;
   }
 
   // ── Transport Management ──────────────────────

@@ -50,15 +50,21 @@ class ThreatChecker extends EventEmitter {
   // Periodic blocklist update — fetches from server every 24 hours
   startAutoUpdate() {
     if (this._updateTimer) return;
+    this._autoUpdateStopped = false;
     // Initial update after 60 seconds (don't block startup)
     this._updateTimer = setTimeout(() => {
+      // Guard: if stopAutoUpdate was called during the 60s wait or while
+      // _fetchBlocklist was awaiting, don't start the interval
+      if (this._autoUpdateStopped) return;
       this._fetchBlocklist();
+      if (this._autoUpdateStopped) return;
       // Then every 24 hours
       this._updateTimer = setInterval(() => this._fetchBlocklist(), 24 * 60 * 60 * 1000);
     }, 60000);
   }
 
   stopAutoUpdate() {
+    this._autoUpdateStopped = true;
     if (this._updateTimer) {
       clearInterval(this._updateTimer);
       clearTimeout(this._updateTimer);

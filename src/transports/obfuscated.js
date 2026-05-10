@@ -517,9 +517,16 @@ class ObfuscatedTransport extends EventEmitter {
   async _detectTun() {
     try {
       if (process.platform === "darwin") {
-        // macOS: sing-box creates utunN (can't guarantee name "vizoguard")
-        // If process is alive, TUN is ready (sing-box exits on TUN creation failure)
-        return this._pid && this._isAlive();
+        // macOS: sing-box creates utunN — probe for actual TUN interface, not just process alive
+        if (!this._pid || !this._isAlive()) return false;
+        try {
+          const { stdout } = await execFileAsync("/sbin/ifconfig", ["-l"]);
+          // Check for any utun interface (sing-box creates utunN)
+          return /\butun\d+\b/.test(stdout);
+        } catch {
+          // ifconfig failed — fall back to process-alive check
+          return true;
+        }
       } else {
         const { stdout } = await execFileAsync("netsh", ["interface", "show", "interface"]);
         return stdout.includes("vizoguard");

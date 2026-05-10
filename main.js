@@ -586,9 +586,12 @@ ipcMain.handle("engine:metrics", () => {
 const engineIntervals = new Map();
 
 ipcMain.on("engine:subscribe", (event) => {
+  // SECURITY: Validate sender like ipcMain.handle wrapper does
+  if (!isValidSender(event)) { console.warn("Blocked engine:subscribe from invalid sender"); return; }
+
   const sender = event.sender;
   const id = sender.id;
-  
+
   // SECURITY FIX: Prevent memory leak - clean up existing interval for this sender
   if (engineIntervals.has(id)) {
     clearInterval(engineIntervals.get(id));
@@ -626,6 +629,7 @@ ipcMain.on("engine:subscribe", (event) => {
 });
 
 ipcMain.on("engine:unsubscribe", (event) => {
+  if (!isValidSender(event)) return;
   const id = event.sender.id;
   if (engineIntervals.has(id)) {
     clearInterval(engineIntervals.get(id));

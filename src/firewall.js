@@ -91,8 +91,9 @@ class Firewall {
       "pass quick on utun3 all",
       "pass quick on utun4 all",
       "pass quick on utun5 all",
-      "# Allow local DNS (for initial VPN server resolution)",
-      "pass quick proto { tcp, udp } to any port 53",
+      "# Allow DNS only to tunnel DNS servers (not any — prevents DNS leak)",
+      "pass quick proto { tcp, udp } to 9.9.9.9 port 53",
+      "pass quick proto { tcp, udp } to 1.1.1.1 port 53",
       "# Block everything else",
       "block all",
     ].join("\n") + "\n";
@@ -133,8 +134,11 @@ class Firewall {
       `netsh advfirewall firewall add rule name="${RULE_PREFIX}-AllowVPN" dir=out action=allow remoteip=${vpnServerIp} enable=yes`,
       // Allow local network (for LAN access + DNS)
       `netsh advfirewall firewall add rule name="${RULE_PREFIX}-AllowLAN" dir=out action=allow remoteip=localsubnet enable=yes`,
-      // Allow DNS (needed for initial VPN server resolution)
-      `netsh advfirewall firewall add rule name="${RULE_PREFIX}-AllowDNS" dir=out action=allow protocol=udp remoteport=53 enable=yes`,
+      // Allow DNS only to tunnel DNS servers — both UDP and TCP (prevents DNS leak)
+      `netsh advfirewall firewall add rule name="${RULE_PREFIX}-AllowDNS1" dir=out action=allow protocol=udp remoteip=9.9.9.9 remoteport=53 enable=yes`,
+      `netsh advfirewall firewall add rule name="${RULE_PREFIX}-AllowDNS1-TCP" dir=out action=allow protocol=tcp remoteip=9.9.9.9 remoteport=53 enable=yes`,
+      `netsh advfirewall firewall add rule name="${RULE_PREFIX}-AllowDNS2" dir=out action=allow protocol=udp remoteip=1.1.1.1 remoteport=53 enable=yes`,
+      `netsh advfirewall firewall add rule name="${RULE_PREFIX}-AllowDNS2-TCP" dir=out action=allow protocol=tcp remoteip=1.1.1.1 remoteport=53 enable=yes`,
       // Block all other outbound traffic
       `netsh advfirewall firewall add rule name="${RULE_PREFIX}-BlockAll" dir=out action=block enable=yes`,
     ];
@@ -146,7 +150,10 @@ class Firewall {
     // Remove all our rules by prefix — use || ver>nul to ignore "not found" errors
     const cmds = [
       `netsh advfirewall firewall delete rule name="${RULE_PREFIX}-BlockAll" || ver>nul`,
-      `netsh advfirewall firewall delete rule name="${RULE_PREFIX}-AllowDNS" || ver>nul`,
+      `netsh advfirewall firewall delete rule name="${RULE_PREFIX}-AllowDNS1" || ver>nul`,
+      `netsh advfirewall firewall delete rule name="${RULE_PREFIX}-AllowDNS1-TCP" || ver>nul`,
+      `netsh advfirewall firewall delete rule name="${RULE_PREFIX}-AllowDNS2" || ver>nul`,
+      `netsh advfirewall firewall delete rule name="${RULE_PREFIX}-AllowDNS2-TCP" || ver>nul`,
       `netsh advfirewall firewall delete rule name="${RULE_PREFIX}-AllowLAN" || ver>nul`,
       `netsh advfirewall firewall delete rule name="${RULE_PREFIX}-AllowVPN" || ver>nul`,
       `netsh advfirewall firewall delete rule name="${RULE_PREFIX}-AllowDHCP" || ver>nul`,
