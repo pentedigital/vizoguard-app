@@ -379,7 +379,7 @@ class VpnManager extends EventEmitter {
     this._routes.markRestored();
 
     // 3. Kill tun2socks
-    this._tunnel.stop();
+    await this._tunnel.stop();
 
     // 5. Destroy SOCKS sockets and server
     if (this._sockets) {

@@ -1,6 +1,7 @@
 const { EventEmitter } = require("events");
 const crypto = require("crypto");
 const fs = require("fs");
+const fsp = require("fs").promises;
 const path = require("path");
 
 const DEBOUNCE_MS = 1000; // Wait 1s after last change before re-hashing
@@ -18,14 +19,14 @@ class ImmuneSystem extends EventEmitter {
     this.events = [];
   }
 
-  start() {
+  async start() {
     this.stop();
 
     this._protectedFiles = this._findProtectedFiles();
 
     // Take initial snapshot
     for (const file of this._protectedFiles) {
-      const hash = this._hashFile(file);
+      const hash = await this._hashFile(file);
       if (hash) this._hashes.set(file, hash);
     }
 
@@ -104,8 +105,8 @@ class ImmuneSystem extends EventEmitter {
     }, DEBOUNCE_MS));
   }
 
-  _checkFile(filepath) {
-    const currentHash = this._hashFile(filepath);
+  async _checkFile(filepath) {
+    const currentHash = await this._hashFile(filepath);
     const storedHash = this._hashes.get(filepath);
 
     if (!currentHash) {
@@ -160,9 +161,9 @@ class ImmuneSystem extends EventEmitter {
     return files;
   }
 
-  _hashFile(filepath) {
+  async _hashFile(filepath) {
     try {
-      const data = fs.readFileSync(filepath);
+      const data = await fsp.readFile(filepath);
       return crypto.createHash("sha256").update(data).digest("hex");
     } catch {
       return null;

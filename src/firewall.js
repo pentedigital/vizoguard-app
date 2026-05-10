@@ -5,6 +5,7 @@
 const { elevatedExec, elevatedBatch } = require("./elevation");
 const path = require("path");
 const fs = require("fs");
+const fsp = require("fs").promises;
 
 const RULE_PREFIX = "Vizoguard-KillSwitch";
 
@@ -98,7 +99,7 @@ class Firewall {
       "block all",
     ].join("\n") + "\n";
 
-    fs.writeFileSync(confPath, rules);
+    await fsp.writeFile(confPath, rules);
 
     // Load the anchor rules and enable PF
     await elevatedBatch([
@@ -109,7 +110,7 @@ class Firewall {
     ]);
 
     // Clean up temp file
-    try { fs.unlinkSync(confPath); } catch {}
+    try { await fsp.unlink(confPath); } catch {}
   }
 
   async _deactivateDarwin() {

@@ -13,11 +13,16 @@ class SecurityProxy extends EventEmitter {
     this._server = null;
     this.requestsScanned = 0;
     this.threatsBlocked = 0;
+    this._lastSampleTime = Date.now();
+    this._lastSampleCount = 0;
+    this._requestsPerSec = 0;
+    this._metricsTimer = null;
   }
 
   start() {
     return new Promise((resolve, reject) => {
       this._sockets = new Set();
+      this._startMetricsSampler();
       this._server = http.createServer((req, res) => {
         this._handleRequest(req, res);
       });
@@ -28,7 +33,10 @@ class SecurityProxy extends EventEmitter {
       });
 
       this._server.on("connect", (req, clientSocket, head) => {
-        this._handleConnect(req, clientSocket, head);
+        this._handleConnect(req, clientSocket, head).catch((e) => {
+          console.error("CONNECT handler error:", e.message);
+          clientSocket.end();
+        });
       });
 
       this._server.on("error", (err) => {
@@ -50,6 +58,10 @@ class SecurityProxy extends EventEmitter {
   }
 
   stop() {
+    if (this._metricsTimer) {
+      clearInterval(this._metricsTimer);
+      this._metricsTimer = null;
+    }
     if (this._server) {
       // Destroy active keep-alive connections so port is freed immediately
       if (this._sockets) {
@@ -59,6 +71,29 @@ class SecurityProxy extends EventEmitter {
       this._server.close();
       this._server = null;
     }
+  }
+
+  _startMetricsSampler() {
+    if (this._metricsTimer) return;
+    this._lastSampleTime = Date.now();
+    this._lastSampleCount = this.requestsScanned;
+    this._metricsTimer = setInterval(() => {
+      const now = Date.now();
+      const current = this.requestsScanned;
+      const elapsed = (now - this._lastSampleTime) / 1000;
+      this._requestsPerSec = elapsed > 0 ? Math.round((current - this._lastSampleCount) / elapsed) : 0;
+      this._lastSampleTime = now;
+      this._lastSampleCount = current;
+    }, 1000);
+  }
+
+  getEngineMetrics() {
+    // Pure read — no mutation
+    return {
+      requestsScanned: this.requestsScanned || 0,
+      threatsBlocked: this.threatsBlocked || 0,
+      requestsPerSec: this._requestsPerSec || 0,
+    };
   }
 
   async _handleRequest(req, res) {
@@ -107,7 +142,7 @@ class SecurityProxy extends EventEmitter {
     }
   }
 
-  _handleConnect(req, clientSocket, head) {
+  async _handleConnect(req, clientSocket, head) {
     this.requestsScanned++;
     // Parse host:port, handling IPv6 [addr]:port format
     const ipv6Match = req.url.match(/^\[([^\]]+)\]:(\d+)$/);
@@ -131,8 +166,8 @@ class SecurityProxy extends EventEmitter {
       return;
     }
 
-    // Synchronous threat check (avoids async timing issues with CONNECT tunnels)
-    const result = this.threatChecker._analyzeUrl(`https://${hostname}`);
+    // Async threat check — moved off the critical path via setImmediate inside checkUrl
+    const result = await this.threatChecker.checkUrl(`https://${hostname}`);
 
     if (result.risk === "critical" || result.risk === "high") {
       this.threatsBlocked++;

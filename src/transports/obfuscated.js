@@ -9,6 +9,7 @@ const dns = require("dns");
 const dnsResolve4 = promisify(dns.resolve4);
 const path = require("path");
 const fs = require("fs");
+const fsp = require("fs").promises;
 const { EventEmitter } = require("events");
 const { app } = require("electron");
 const { elevatedExec, elevatedBatch } = require("../elevation");
@@ -76,7 +77,7 @@ class ObfuscatedTransport extends EventEmitter {
     return result.uuid;
   }
 
-  _getBinaryPath() {
+  async _getBinaryPath() {
     const platform = process.platform === "darwin" ? "darwin" : "win";
     const arch = process.arch === "arm64" ? "arm64" : (process.platform === "darwin" ? "x64" : "amd64");
     const ext = process.platform === "win32" ? ".exe" : "";
@@ -89,13 +90,15 @@ class ObfuscatedTransport extends EventEmitter {
     const binPath = path.join(base, `sing-box${ext}`);
 
     // Fail fast if binary doesn't exist
-    if (!fs.existsSync(binPath)) {
+    try {
+      await fsp.access(binPath);
+    } catch {
       throw new Error(`sing-box binary not found at ${binPath}`);
     }
 
     // Ensure executable permission (macOS packaging can strip it)
     if (process.platform !== "win32") {
-      try { fs.chmodSync(binPath, 0o755); } catch {}
+      try { await fsp.chmod(binPath, 0o755); } catch {}
     }
 
     return binPath;
@@ -114,13 +117,23 @@ class ObfuscatedTransport extends EventEmitter {
   }
 
   // Read tail of sing-box log file for diagnostics
-  _readLogTail() {
+  async _readLogTail() {
     try {
       const logPath = this._logFile || this._getLogFile();
       const errPath = logPath.replace(/\.log$/, ".err");
 
-      const logExists = fs.existsSync(logPath);
-      const errExists = errPath !== logPath && fs.existsSync(errPath);
+      let logExists = false;
+      let errExists = false;
+      try {
+        await fsp.access(logPath);
+        logExists = true;
+      } catch {}
+      if (errPath !== logPath) {
+        try {
+          await fsp.access(errPath);
+          errExists = true;
+        } catch {}
+      }
 
       if (!logExists && !errExists) return "(no log file found)";
 
@@ -128,13 +141,13 @@ class ObfuscatedTransport extends EventEmitter {
 
       // Read stdout log
       if (logExists) {
-        const content = fs.readFileSync(logPath, "utf8").trim();
+        const content = (await fsp.readFile(logPath, "utf8")).trim();
         if (content) output += content;
       }
 
       // On Windows, stderr goes to a separate .err file
       if (errExists) {
-        const errContent = fs.readFileSync(errPath, "utf8").trim();
+        const errContent = (await fsp.readFile(errPath, "utf8")).trim();
         if (errContent) output += (output ? "\n" : "") + errContent;
       }
 
@@ -347,7 +360,7 @@ class ObfuscatedTransport extends EventEmitter {
     // Ensure UUID is available before any setup (auto-provisions if missing)
     await this._ensureVlessUuid();
 
-    const binPath = this._getBinaryPath();
+    const binPath = await this._getBinaryPath();
     const configPath = this._getConfigPath();
     const pidFile = this._getPidFile();
     const logFile = this._getLogFile();
@@ -367,11 +380,11 @@ class ObfuscatedTransport extends EventEmitter {
     // Generate and validate config before writing
     const config = this._generateConfig(serverIps);
     this._validateConfig(config);
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    await fsp.writeFile(configPath, JSON.stringify(config, null, 2));
 
     // Clean stale PID and log
-    try { fs.unlinkSync(pidFile); } catch {}
-    try { fs.unlinkSync(logFile); } catch {}
+    try { await fsp.unlink(pidFile); } catch {}
+    try { await fsp.unlink(logFile); } catch {}
 
     console.log(`Starting sing-box (obfuscated): ${binPath}`);
     console.log(sanitize(`Config: ${configPath}, PID file: ${pidFile}, Log: ${logFile}`));
@@ -403,14 +416,14 @@ class ObfuscatedTransport extends EventEmitter {
     for (let i = 0; i < 16; i++) {
       await new Promise(r => setTimeout(r, 500));
       try {
-        const content = fs.readFileSync(pidFile, "utf8").trim();
+        const content = (await fsp.readFile(pidFile, "utf8")).trim();
         const parsed = parseInt(content, 10);
         if (parsed > 0) { pid = parsed; break; }
       } catch {}
     }
 
     if (!pid) {
-      const logs = this._readLogTail();
+      const logs = await this._readLogTail();
       throw new Error(`sing-box failed to start — could not read PID. Check binary path and permissions.\n\nsing-box output:\n${logs}`);
     }
 
@@ -418,7 +431,7 @@ class ObfuscatedTransport extends EventEmitter {
     try {
       process.kill(pid, 0);
     } catch {
-      const logs = this._readLogTail();
+      const logs = await this._readLogTail();
       throw new Error(`sing-box process ${pid} exited immediately.\n\nsing-box output:\n${logs}`);
     }
 
@@ -434,8 +447,8 @@ class ObfuscatedTransport extends EventEmitter {
     }
 
     if (!found) {
-      const logs = this._readLogTail();
-      this.stop();
+      const logs = await this._readLogTail();
+      await this.stop();
       throw new Error(`sing-box started but TUN interface did not appear.\n\nsing-box output:\n${logs}`);
     }
 
@@ -448,7 +461,7 @@ class ObfuscatedTransport extends EventEmitter {
         this._pid = null;
         this._running = false;
         this._stopHealth();
-        const logs = this._readLogTail();
+        const logs = await this._readLogTail();
         // Restore routes before emitting error — prevents internet blackhole
         await this._ensureRouteRestored();
         this.emit("error", new Error(`Obfuscated tunnel process died.\n\nsing-box output:\n${logs}`));
@@ -470,7 +483,9 @@ class ObfuscatedTransport extends EventEmitter {
 
       try {
         if (process.platform === "win32") {
-          try { execFileSync("taskkill", ["/F", "/PID", String(pid)], { timeout: 5000 }); } catch {}
+          await new Promise((resolve) => {
+            execFile("taskkill", ["/F", "/PID", String(pid)], { timeout: 5000 }, () => resolve());
+          });
         } else {
           process.kill(pid, "SIGTERM");
           // Wait briefly for graceful shutdown before force-killing
@@ -484,10 +499,10 @@ class ObfuscatedTransport extends EventEmitter {
     await this._ensureRouteRestored();
 
     // Clean up temp files
-    try { fs.unlinkSync(this._getConfigPath()); } catch {}
-    try { fs.unlinkSync(this._getPidFile()); } catch {}
-    try { fs.unlinkSync(this._getLogFile()); } catch {}
-    try { fs.unlinkSync(this._getLogFile().replace(/\.log$/, ".err")); } catch {}
+    try { await fsp.unlink(this._getConfigPath()); } catch {}
+    try { await fsp.unlink(this._getPidFile()); } catch {}
+    try { await fsp.unlink(this._getLogFile()); } catch {}
+    try { await fsp.unlink(this._getLogFile().replace(/\.log$/, ".err")); } catch {}
 
     this._running = false;
     if (wasRunning) this.emit("disconnected");

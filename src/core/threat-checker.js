@@ -165,7 +165,7 @@ class ThreatChecker extends EventEmitter {
     const cached = this._cacheGet(url);
     if (cached !== null) return cached;
 
-    const result = this._analyzeUrl(url);
+    const result = await this._analyzeUrl(url);
     this._cacheSet(url, result);
 
     if (result.risk === "critical" || result.risk === "high") {
@@ -175,86 +175,91 @@ class ThreatChecker extends EventEmitter {
     return result;
   }
 
-  _analyzeUrl(url) {
-    let parsed;
-    try {
-      parsed = new URL(url);
-    } catch {
-      return { risk: "low", checks: [] };
-    }
+  async _analyzeUrl(url) {
+    return new Promise((resolve) => {
+      setImmediate(() => {
+        let parsed;
+        try {
+          parsed = new URL(url);
+        } catch {
+          resolve({ risk: "low", checks: [] });
+          return;
+        }
 
-    const hostname = parsed.hostname.toLowerCase();
-    const checks = [];
+        const hostname = parsed.hostname.toLowerCase();
+        const checks = [];
 
-    // 1. Local blocklist
-    if (this._blocklist.has(hostname)) {
-      checks.push({ name: "blocklist", risk: "critical", detail: "Domain on blocklist" });
-    }
+        // 1. Local blocklist
+        if (this._blocklist.has(hostname)) {
+          checks.push({ name: "blocklist", risk: "critical", detail: "Domain on blocklist" });
+        }
 
-    // 2. Suspicious TLD
-    const tld = "." + hostname.split(".").pop();
-    if (this._suspiciousTlds.has(tld)) {
-      checks.push({ name: "suspicious_tld", risk: "medium", detail: `Suspicious TLD: ${tld}` });
-    }
+        // 2. Suspicious TLD
+        const tld = "." + hostname.split(".").pop();
+        if (this._suspiciousTlds.has(tld)) {
+          checks.push({ name: "suspicious_tld", risk: "medium", detail: `Suspicious TLD: ${tld}` });
+        }
 
-    // 3. Brand impersonation
-    // Extract the registrable domain (e.g., "secure-amazon.com" → "secure-amazon")
-    const parts = hostname.split(".");
-    const sld = parts.length >= 2 ? parts[parts.length - 2] : "";
-    for (const brand of this._brandNames) {
-      if (!hostname.includes(brand)) continue;
-      // Legitimate: the SLD starts with the brand name (amazon.com, amazonaws.com, amazoncdn.net)
-      // or is a subdomain of a brand-owned domain (maps.google.com, api.paypal.com)
-      if (sld.startsWith(brand) || (parts.length >= 3 && parts[parts.length - 2] === brand)) {
-        continue; // Brand-owned domain
-      }
-      // Brand name embedded elsewhere (e.g., "secure-amazon-login.com", "paypa1-verify.net")
-      checks.push({ name: "brand_impersonation", risk: "high", detail: `Possible ${brand} impersonation` });
-      break;
-    }
+        // 3. Brand impersonation
+        // Extract the registrable domain (e.g., "secure-amazon.com" → "secure-amazon")
+        const parts = hostname.split(".");
+        const sld = parts.length >= 2 ? parts[parts.length - 2] : "";
+        for (const brand of this._brandNames) {
+          if (!hostname.includes(brand)) continue;
+          // Legitimate: the SLD starts with the brand name (amazon.com, amazonaws.com, amazoncdn.net)
+          // or is a subdomain of a brand-owned domain (maps.google.com, api.paypal.com)
+          if (sld.startsWith(brand) || (parts.length >= 3 && parts[parts.length - 2] === brand)) {
+            continue; // Brand-owned domain
+          }
+          // Brand name embedded elsewhere (e.g., "secure-amazon-login.com", "paypa1-verify.net")
+          checks.push({ name: "brand_impersonation", risk: "high", detail: `Possible ${brand} impersonation` });
+          break;
+        }
 
-    // 4. IP address in URL
-    if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
-      checks.push({ name: "ip_address", risk: "medium", detail: "IP address used instead of domain" });
-    }
+        // 4. IP address in URL
+        if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+          checks.push({ name: "ip_address", risk: "medium", detail: "IP address used instead of domain" });
+        }
 
-    // 5. Excessive subdomains
-    if (hostname.split(".").length > 4) {
-      checks.push({ name: "subdomains", risk: "medium", detail: "Excessive subdomains" });
-    }
+        // 5. Excessive subdomains
+        if (hostname.split(".").length > 4) {
+          checks.push({ name: "subdomains", risk: "medium", detail: "Excessive subdomains" });
+        }
 
-    // 6. Dangerous file download
-    const urlPath = parsed.pathname.toLowerCase();
-    for (const ext of this._dangerousExtensions) {
-      if (urlPath.endsWith(ext)) {
-        checks.push({ name: "dangerous_download", risk: "high", detail: `Dangerous file type: ${ext}` });
-        break;
-      }
-    }
+        // 6. Dangerous file download
+        const urlPath = parsed.pathname.toLowerCase();
+        for (const ext of this._dangerousExtensions) {
+          if (urlPath.endsWith(ext)) {
+            checks.push({ name: "dangerous_download", risk: "high", detail: `Dangerous file type: ${ext}` });
+            break;
+          }
+        }
 
-    // 7. Homoglyph detection (basic)
-    if (/[а-яА-Я]/.test(hostname) || hostname.startsWith("xn--")) {
-      checks.push({ name: "homoglyph", risk: "high", detail: "IDN/punycode detected — possible lookalike domain" });
-    }
+        // 7. Homoglyph detection (basic)
+        if (/[а-яА-Я]/.test(hostname) || hostname.startsWith("xn--")) {
+          checks.push({ name: "homoglyph", risk: "high", detail: "IDN/punycode detected — possible lookalike domain" });
+        }
 
-    // 8. Phishing keywords in URL
-    const phishingKeywords = ["login", "verify", "update", "secure", "account", "confirm", "suspend", "locked"];
-    const urlLower = url.toLowerCase();
-    const keywordHits = phishingKeywords.filter((k) => urlLower.includes(k));
-    if (keywordHits.length >= 2) {
-      checks.push({ name: "phishing_keywords", risk: "medium", detail: `Phishing indicators: ${keywordHits.join(", ")}` });
-    }
+        // 8. Phishing keywords in URL
+        const phishingKeywords = ["login", "verify", "update", "secure", "account", "confirm", "suspend", "locked"];
+        const urlLower = url.toLowerCase();
+        const keywordHits = phishingKeywords.filter((k) => urlLower.includes(k));
+        if (keywordHits.length >= 2) {
+          checks.push({ name: "phishing_keywords", risk: "medium", detail: `Phishing indicators: ${keywordHits.join(", ")}` });
+        }
 
-    // Calculate overall risk
-    const riskLevels = { critical: 4, high: 3, medium: 2, low: 1 };
-    let maxRisk = "low";
-    for (const check of checks) {
-      if (riskLevels[check.risk] > riskLevels[maxRisk]) {
-        maxRisk = check.risk;
-      }
-    }
+        // Calculate overall risk
+        const riskLevels = { critical: 4, high: 3, medium: 2, low: 1 };
+        let maxRisk = "low";
+        for (const check of checks) {
+          if (riskLevels[check.risk] > riskLevels[maxRisk]) {
+            maxRisk = check.risk;
+          }
+        }
 
-    return { risk: maxRisk, checks, hostname };
+        resolve({ risk: maxRisk, checks, hostname });
+      });
+    });
   }
 
 }

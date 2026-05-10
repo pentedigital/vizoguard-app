@@ -1,6 +1,7 @@
 const { execFile, execFileSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const fsp = require("fs").promises;
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
 const { EventEmitter } = require("events");
@@ -31,7 +32,7 @@ class Tunnel extends EventEmitter {
     return this._deviceName;
   }
 
-  _getBinaryPath() {
+  async _getBinaryPath() {
     const platform = process.platform === "darwin" ? "darwin" : "win";
     const arch = process.arch === "arm64" ? "arm64" : (process.platform === "darwin" ? "x64" : "amd64");
     const ext = process.platform === "win32" ? ".exe" : "";
@@ -45,13 +46,15 @@ class Tunnel extends EventEmitter {
     const binPath = path.join(base, binName);
 
     // Fail fast if binary doesn't exist
-    if (!fs.existsSync(binPath)) {
+    try {
+      await fsp.access(binPath);
+    } catch {
       throw new Error(`tun2socks binary not found at ${binPath}`);
     }
 
     // Ensure executable permission (macOS packaging can strip it)
     if (process.platform !== "win32") {
-      try { fs.chmodSync(binPath, 0o755); } catch {}
+      try { await fsp.chmod(binPath, 0o755); } catch {}
     }
 
     return binPath;
@@ -67,11 +70,11 @@ class Tunnel extends EventEmitter {
   async start(socksPort = 1080) {
     if (this._pid) return;
 
-    const binPath = this._getBinaryPath();
+    const binPath = await this._getBinaryPath();
     const device = process.platform === "darwin" ? "utun" : "tun://vizoguard";
     const pidFile = this._getPidFile();
 
-    try { fs.unlinkSync(pidFile); } catch {}
+    try { await fsp.unlink(pidFile); } catch {}
 
     console.log(`Starting tun2socks (elevated): ${binPath}`);
 
@@ -94,7 +97,7 @@ class Tunnel extends EventEmitter {
     for (let i = 0; i < 16; i++) {
       await new Promise(r => setTimeout(r, 500));
       try {
-        const content = fs.readFileSync(pidFile, "utf8").trim();
+        const content = (await fsp.readFile(pidFile, "utf8")).trim();
         const parsed = parseInt(content, 10);
         if (parsed > 0) { pid = parsed; break; }
       } catch {}
@@ -120,7 +123,7 @@ class Tunnel extends EventEmitter {
     }
 
     if (!found) {
-      this.stop();
+      await this.stop();
       throw new Error("tun2socks started but TUN interface did not appear");
     }
 
@@ -163,7 +166,7 @@ class Tunnel extends EventEmitter {
     }
   }
 
-  stop() {
+  async stop() {
     this._stopHealth();
 
     if (this._pid) {
@@ -174,15 +177,18 @@ class Tunnel extends EventEmitter {
       try {
         if (process.platform === "win32") {
           // taskkill with PID (integer we control — safe)
-          try { execFileSync("taskkill", ["/F", "/PID", String(pid)], { timeout: 5000 }); } catch {}
+          await new Promise((resolve) => {
+            execFile("taskkill", ["/F", "/PID", String(pid)], { timeout: 5000 }, () => resolve());
+          });
         } else {
           process.kill(pid, "SIGTERM");
-          setTimeout(() => { try { process.kill(pid, "SIGKILL"); } catch {} }, 3000);
+          await new Promise(r => setTimeout(r, 3000));
+          try { process.kill(pid, "SIGKILL"); } catch {}
         }
       } catch {}
     }
 
-    try { fs.unlinkSync(this._getPidFile()); } catch {}
+    try { await fsp.unlink(this._getPidFile()); } catch {}
   }
 
   _stopHealth() {

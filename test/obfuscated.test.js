@@ -208,53 +208,53 @@ describe("ObfuscatedTransport._readLogTail", () => {
     cleanFiles(logPath, errPath);
   });
 
-  it("returns '(no log file found)' when log does not exist", () => {
+  it("returns '(no log file found)' when log does not exist", async () => {
     const t = makeTransport();
     t._logFile = path.join(os.tmpdir(), `nonexistent-${Date.now()}-${Math.random()}.log`);
-    assert.equal(t._readLogTail(), "(no log file found)");
+    assert.equal(await t._readLogTail(), "(no log file found)");
   });
 
-  it("returns '(log file empty)' when log is empty", () => {
+  it("returns '(log file empty)' when log is empty", async () => {
     fs.writeFileSync(logPath, "");
     const t = makeTransport();
     t._logFile = logPath;
-    assert.equal(t._readLogTail(), "(log file empty)");
+    assert.equal(await t._readLogTail(), "(log file empty)");
   });
 
-  it("reads stdout log content", () => {
+  it("reads stdout log content", async () => {
     fs.writeFileSync(logPath, "FATAL: config parse error at line 5\n");
     const t = makeTransport();
     t._logFile = logPath;
-    const result = t._readLogTail();
+    const result = await t._readLogTail();
     assert.ok(result.includes("config parse error"));
   });
 
-  it("merges stderr (.err) content on Windows-style split logs", () => {
+  it("merges stderr (.err) content on Windows-style split logs", async () => {
     fs.writeFileSync(logPath, "starting sing-box\n");
     fs.writeFileSync(errPath, "error: bind failed on :1080\n");
     const t = makeTransport();
     t._logFile = logPath;
-    const result = t._readLogTail();
+    const result = await t._readLogTail();
     assert.ok(result.includes("starting sing-box"), "should include stdout");
     assert.ok(result.includes("bind failed"), "should include stderr");
   });
 
-  it("limits output to last 30 lines", () => {
+  it("limits output to last 30 lines", async () => {
     const lines = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`);
     fs.writeFileSync(logPath, lines.join("\n"));
     const t = makeTransport();
     t._logFile = logPath;
-    const result = t._readLogTail();
+    const result = await t._readLogTail();
     const outputLines = result.split("\n");
     assert.equal(outputLines.length, LOG_TAIL_LINES, `should return last ${LOG_TAIL_LINES} lines`);
     assert.ok(outputLines[0].includes("line 71"), "first returned line should be line 71");
     assert.ok(outputLines[29].includes("line 100"), "last returned line should be line 100");
   });
 
-  it("handles read errors gracefully", () => {
+  it("handles read errors gracefully", async () => {
     const t = makeTransport();
     t._logFile = os.tmpdir();
-    const result = t._readLogTail();
+    const result = await t._readLogTail();
     assert.ok(typeof result === "string");
   });
 });
@@ -379,41 +379,41 @@ describe("Error messages include sing-box output", () => {
     cleanFiles(logPath);
   });
 
-  it("PID-not-found error includes log output", () => {
+  it("PID-not-found error includes log output", async () => {
     fs.writeFileSync(logPath, "FATAL: permission denied opening /dev/net/tun\n");
     const t = makeTransport();
     t._logFile = logPath;
-    const logs = t._readLogTail();
+    const logs = await t._readLogTail();
     const errorMsg = `sing-box failed to start — could not read PID. Check binary path and permissions.\n\nsing-box output:\n${logs}`;
     assert.ok(errorMsg.includes("permission denied"));
     assert.ok(errorMsg.includes("could not read PID"));
   });
 
-  it("immediate-exit error includes log output", () => {
+  it("immediate-exit error includes log output", async () => {
     fs.writeFileSync(logPath, "error: TLS handshake failed: certificate has expired\n");
     const t = makeTransport();
     t._logFile = logPath;
-    const logs = t._readLogTail();
+    const logs = await t._readLogTail();
     const errorMsg = `sing-box process 7028 exited immediately.\n\nsing-box output:\n${logs}`;
     assert.ok(errorMsg.includes("TLS handshake failed"));
     assert.ok(errorMsg.includes("7028 exited immediately"));
   });
 
-  it("TUN-not-found error includes log output", () => {
+  it("TUN-not-found error includes log output", async () => {
     fs.writeFileSync(logPath, "warn: TUN device creation failed: operation not permitted\n");
     const t = makeTransport();
     t._logFile = logPath;
-    const logs = t._readLogTail();
+    const logs = await t._readLogTail();
     const errorMsg = `sing-box started but TUN interface did not appear.\n\nsing-box output:\n${logs}`;
     assert.ok(errorMsg.includes("operation not permitted"));
     assert.ok(errorMsg.includes("TUN interface did not appear"));
   });
 
-  it("health-monitor error includes log output", () => {
+  it("health-monitor error includes log output", async () => {
     fs.writeFileSync(logPath, "error: connection reset by peer\n");
     const t = makeTransport();
     t._logFile = logPath;
-    const logs = t._readLogTail();
+    const logs = await t._readLogTail();
     const errorMsg = `Obfuscated tunnel process died.\n\nsing-box output:\n${logs}`;
     assert.ok(errorMsg.includes("connection reset by peer"));
     assert.ok(errorMsg.includes("tunnel process died"));
