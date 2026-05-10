@@ -79,6 +79,14 @@
 - **Blocklist auto-update**: `ThreatChecker.startAutoUpdate()` fetches `/api/blocklist` every 24h; atomic file swap + cache clear
 - **Grace period hardening**: Server `iat` timestamp stored and checked to detect backward clock manipulation
 
+## Bug Hunt Fixes (2026-05-10)
+- **Kill switch DNS leak**: PF/netsh rules restricted to 9.9.9.9/1.1.1.1 only (TCP+UDP); was `any port 53`
+- **IPC sender bypass**: `engine:subscribe`/`engine:unsubscribe` (`ipcMain.on`) added `isValidSender()` checks
+- **Double reconnect timer**: Added `_reconnectInFlight` flag in connection-manager to prevent re-entry
+- **Clock skew license rejection**: Removed `expires < now` check from `_validateLicenseResponse`; server status is authoritative
+- **Blocklist interval leak**: Added `_autoUpdateStopped` flag to prevent interval assignment after `stopAutoUpdate`
+- **macOS TUN false positive**: `_detectTun` now probes `ifconfig -l` for utun interfaces, not just process alive
+
 ## Commands
 - `npm install` — install dependencies
 - `npm start` — run in dev mode (see `package.json` scripts)
