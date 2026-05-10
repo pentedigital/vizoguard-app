@@ -190,6 +190,7 @@ class LicenseManager {
       // Clear stale VPN URL on status recovery
       if ((previousStatus === "suspended" || previousStatus === "expired") && result.status === "active") {
         this.store.delete("license.vpnAccessUrl");
+      this.store.delete("license.vlessUuid");
         this.store.delete("license.vlessUuid");
       }
       this.store.set("license.lastSuccessfulCheck", new Date().toISOString());
@@ -205,7 +206,15 @@ class LicenseManager {
             this.store.delete("license.vpnAccessUrl");
         this.store.delete("license.vlessUuid");
           }
-          // 404 = not provisioned yet — ignore
+          // 404 = not provisioned yet — try to create
+          if (vpnErr.httpStatus === 404) {
+            try {
+              const created = await apiCall("/vpn/create", { key, device_id: deviceId });
+              this.store.set("license.vpnAccessUrl", created.access_url);
+            } catch (createErr) {
+              console.error("VPN create fallback failed:", sanitize(String(createErr.message || createErr.error || "")));
+            }
+          }
         }
       }
 
@@ -259,11 +268,13 @@ class LicenseManager {
     if (!key) throw new Error("No license key stored");
     const deviceId = await platform.getDeviceId();
 
-    const result = await apiCall("/license/transfer", { key, device_id: deviceId });
+    const currentDeviceId = this.store.get("license.deviceId");
+    const result = await apiCall("/license/transfer", { key, device_id: deviceId, current_device_id: currentDeviceId });
     if (result.success) {
       // Update stored device ID and clear stale VPN key
       this.store.set("license.deviceId", deviceId);
       this.store.delete("license.vpnAccessUrl");
+      this.store.delete("license.vlessUuid");
       console.log("License transferred to this device");
     }
     return result;

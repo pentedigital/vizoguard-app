@@ -40,6 +40,15 @@ require.cache[platformPath] = {
   exports: { getDeviceId: async () => "test-device-123" },
 };
 
+// Mock license verification (tests exercise LicenseManager, not HMAC crypto)
+const verifyPath = require.resolve("../src/util/license-verify");
+require.cache[verifyPath] = {
+  id: verifyPath,
+  filename: verifyPath,
+  loaded: true,
+  exports: { verifyLicenseResponse: () => true },
+};
+
 // ── Now safely require the module under test ────────────────────────────────
 
 const LicenseManager = require("../src/license");

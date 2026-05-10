@@ -96,7 +96,9 @@ function verifyLicenseResponse(response) {
       console.warn("[license-verify] Response missing signature but secret is configured");
       return false;
     }
-    return true; // Backward compat when no secret configured
+    // Fail closed in production: require secret to be configured
+    console.error("[license-verify] LICENSE_RESPONSE_SECRET not configured — rejecting unsigned response");
+    return false;
   }
 
   if (!SHARED_SECRET) {
