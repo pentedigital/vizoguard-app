@@ -2,6 +2,7 @@
 // Used in non-censored networks for maximum speed
 
 const { EventEmitter } = require("events");
+const { tagTransportError } = require("../util/transport-errors");
 
 class DirectTransport extends EventEmitter {
   constructor(vpnManager) {
@@ -40,7 +41,7 @@ class DirectTransport extends EventEmitter {
       this._running = this._vpn.isConnected;
     } catch (err) {
       this._removeVpnListeners();
-      throw err;
+      throw tagTransportError(err);
     }
   }
 

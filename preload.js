@@ -27,9 +27,23 @@ contextBridge.exposeInMainWorld("vizoguard", {
 
   // App
   openExternal: (url) => ipcRenderer.invoke("app:openExternal", url),
+  // D-2: action buttons on license-error toasts use this strict-allowlist channel
+  openExternalAction: (url) => ipcRenderer.invoke("external:open", url),
   quit: () => ipcRenderer.invoke("app:quit"),
   minimize: () => ipcRenderer.invoke("app:minimize"),
   close: () => ipcRenderer.invoke("app:close"),
+
+  // D-7: Kill switch
+  getKillSwitchStatus: () => ipcRenderer.invoke("kill-switch:status"),
+  deactivateKillSwitch: () => ipcRenderer.invoke("kill-switch:deactivate"),
+  onKillSwitchState: (cb) => { ipcRenderer.removeAllListeners("kill-switch:state"); ipcRenderer.on("kill-switch:state", (_e, d) => cb(d)); },
+
+  // D-8: updater download progress
+  onUpdateProgress: (cb) => { ipcRenderer.removeAllListeners("update:progress"); ipcRenderer.on("update:progress", (_e, d) => cb(d)); },
+
+  // D-10: diagnostics export
+  exportDiagnostics: (history) => ipcRenderer.invoke("diagnostics:export", { history }),
+  showItemInFolder: (fullPath) => ipcRenderer.invoke("shell:showItemInFolder", fullPath),
 
   // Events from main process (removeAllListeners before adding to prevent accumulation across page loads)
   onThreatBlocked: (cb) => { ipcRenderer.removeAllListeners("threat:blocked"); ipcRenderer.on("threat:blocked", (_e, d) => cb(d)); },

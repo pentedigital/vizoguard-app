@@ -14,6 +14,7 @@ const { EventEmitter } = require("events");
 const { app } = require("electron");
 const { elevatedExec, elevatedBatch } = require("../elevation");
 const { sanitize } = require("../util/sanitize");
+const { tagTransportError } = require("../util/transport-errors");
 
 // Safe shell escaping — wraps in single quotes, escapes embedded single quotes
 function shellEscape(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
@@ -357,6 +358,14 @@ class ObfuscatedTransport extends EventEmitter {
   async start() {
     if (this._running) return;
 
+    try {
+      await this._startInner();
+    } catch (err) {
+      throw tagTransportError(err);
+    }
+  }
+
+  async _startInner() {
     // Ensure UUID is available before any setup (auto-provisions if missing)
     await this._ensureVlessUuid();
 

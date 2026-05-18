@@ -1021,3 +1021,122 @@ a:hover { opacity: 0.8; }
 .history-action.disconnected  { color: var(--mist); }
 .history-action.threat_blocked { color: var(--amber); }
 .history-action.error         { color: var(--red); }
+
+/* ── D-7: Kill switch pill ────────────────────────────────── */
+.kill-switch-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px auto 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--glass-surface);
+  border: 1px solid var(--glass-border);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--mist);
+  width: max-content;
+  max-width: 90%;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Center within the column under the status timer */
+body > .kill-switch-pill {
+  display: flex;
+  justify-self: center;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.kill-switch-pill .ks-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mist);
+  display: inline-block;
+}
+
+.kill-switch-pill.active { border-color: rgba(0, 229, 160, 0.30); color: var(--ice); }
+.kill-switch-pill.active .ks-dot { background: var(--teal); box-shadow: 0 0 6px var(--teal); }
+.kill-switch-pill.error { border-color: rgba(255, 59, 59, 0.30); color: var(--red); }
+.kill-switch-pill.error .ks-dot { background: var(--red); box-shadow: 0 0 6px var(--red); }
+.kill-switch-pill.off { opacity: 0.7; }
+.kill-switch-pill.off .ks-dot { background: var(--mist); }
+
+/* ── D-7: Panic-off dialog ───────────────────────────────── */
+.ks-dialog {
+  background: rgba(10,10,15,0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 20px;
+  max-width: 360px;
+  color: var(--ice);
+  font-family: var(--font);
+}
+.ks-dialog::backdrop { background: rgba(0,0,0,0.55); }
+.ks-dialog-title {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: var(--ice);
+}
+.ks-dialog-body {
+  font-size: 0.82rem;
+  color: var(--mist);
+  margin-bottom: 16px;
+  line-height: 1.45;
+}
+.ks-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.ks-dialog-actions .btn { width: auto; margin: 0; }
+
+/* ── D-8: Update progress bar ────────────────────────────── */
+.update-progress {
+  margin-top: 8px;
+}
+.update-progress-label {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--mist);
+  margin-bottom: 4px;
+}
+.update-progress .progress-bar {
+  flex: none;
+  width: 100%;
+  height: 6px;
+  margin: 0;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.update-progress .progress-fill {
+  height: 100%;
+  background: var(--teal);
+  border-radius: 3px;
+  width: 0%;
+  transition: width 200ms ease;
+}
+
+/* ── D-2: Toast title + action button ───────────────────── */
+.toast-body { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.toast-title { font-weight: 700; font-size: 0.85rem; color: var(--ice); }
+.toast-msg { font-size: 0.78rem; color: var(--mist); line-height: 1.35; }
+.toast-action {
+  background: var(--accent);
+  color: #000;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+.toast-action:hover { transform: translateY(-1px); }

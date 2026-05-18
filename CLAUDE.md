@@ -1,5 +1,55 @@
 # VizoGuard Desktop App
 
+## No-Deferral Rule (Meddie, 2026-05-18)
+No implementation requested by Meddie may be deferred, skipped, postponed,
+ignored, downgraded, or left incomplete, except for Dark Mode. Tests must
+pass because the implementation is correct, not because tests were modified.
+
+## ⚠️ Open Blocker: Signed Mac DMG cannot be built from Linux VPS
+
+**Affected files / artifacts:**
+- `electron-builder.yml` (already configured for macOS signing)
+- `build/entitlements.mac.plist` (entitlements ready)
+- `package.json` `"build:mac"` script (`electron-builder --mac`)
+- Distribution target: `/var/www/vizoguard/downloads/Vizoguard-latest.dmg`
+  (symlink) + `latest-mac.yml` (electron-updater feed)
+
+**Reason:** macOS DMG signing requires the host machine to be macOS with:
+- An installed Apple Developer ID Application certificate
+  (Keychain: "Developer ID Application: PRIME360 HOLDING LTD (TEAM_ID)")
+- Network access to Apple's notarization service
+  (`xcrun notarytool submit --wait`)
+- `codesign` (Xcode CLT) — Linux/Wine cannot produce a valid Apple signature
+
+This VPS is Ubuntu and lacks both `codesign` and any Apple-issued cert.
+Cross-signing from Linux produces an unsigned DMG that Gatekeeper rejects
+with "Vizoguard.app is damaged."
+
+**Specific action required to resolve (in this order):**
+1. On a macOS machine with the developer cert installed:
+   ```
+   git clone https://github.com/pentedigital/vizoguard-app
+   cd vizoguard-app && npm ci
+   export APPLE_ID="<account email>"
+   export APPLE_APP_SPECIFIC_PASSWORD="<app password from appleid.apple.com>"
+   export APPLE_TEAM_ID="<10-char team id>"
+   npm run build:mac    # produces dist/Vizoguard-<v>.dmg + .blockmap
+   ```
+2. After notarization completes, scp the produced artifacts to the VPS:
+   ```
+   scp dist/Vizoguard-1.3.5.dmg  dist/Vizoguard-1.3.5-arm64.dmg \
+       dist/latest-mac.yml dist/*.blockmap \
+       root@vizoguard.com:/var/www/vizoguard/downloads/
+   ```
+3. Update the latest-DMG symlink on the VPS:
+   `cd /var/www/vizoguard/downloads && ln -sf Vizoguard-1.3.5.dmg Vizoguard-latest.dmg`
+4. The auto-updater detects the new version via `latest-mac.yml` and
+   prompts installed clients to update — no further action.
+
+**Windows .exe** build is similarly blocked unless either (a) you run
+`build:win` on a Windows host with a code-signing cert, or (b) you use a
+Linux-compatible signing service like `osslsigncode` with a purchased cert.
+
 ## Stack
 - Electron app (`main.js` entry, `preload.js` bridge)
 - Cross-platform: `src/platform/` — darwin.js, win32.js, index.js (auto-selects)

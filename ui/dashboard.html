@@ -57,6 +57,12 @@
 </div>
 <div class="status-timer" id="status-timer"></div>
 
+<!-- 4a. Kill switch status pill (D-7) -->
+<div class="kill-switch-pill" id="kill-switch-pill" aria-live="polite" aria-atomic="true">
+  <span class="ks-dot" id="ks-dot"></span>
+  <span class="ks-label" id="ks-label">Kill switch off</span>
+</div>
+
 <!-- 4b. Weekly summary bar (visible when connected or has weekly data) -->
 <div class="weekly-summary" id="weekly-summary" style="display:none">
   <span class="weekly-item"><strong id="weekly-threats">0</strong> threats blocked</span>
@@ -227,8 +233,19 @@
 
   <!-- action buttons -->
   <button class="btn btn-sm" id="update-btn" onclick="checkUpdate()">Check for Updates</button>
+  <!-- D-8: Update progress bar (hidden until a download is in-flight) -->
+  <div class="update-progress" id="update-progress" style="display:none;" aria-live="polite">
+    <div class="update-progress-label" id="update-progress-label">Downloading update...</div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="update-progress-fill" style="width:0%"></div>
+    </div>
+  </div>
   <button class="btn btn-sm btn-ghost" onclick="window.vizoguard.openExternal('mailto:support@vizoguard.com')">Contact Support</button>
   <button class="btn btn-sm btn-ghost" onclick="window.vizoguard.openExternal('https://vizoguard.com')">Visit Website</button>
+  <!-- D-10: Export diagnostics -->
+  <button class="btn btn-sm btn-ghost" id="diag-btn" onclick="exportDiagnostics()">Export diagnostics</button>
+  <!-- D-7: Panic off — disable kill switch -->
+  <button class="btn btn-sm btn-ghost" id="ks-off-btn" onclick="confirmDisableKillSwitch()" style="display:none;">Disable kill switch (panic off)</button>
   <div class="settings-divider"></div>
   <div class="settings-section-label">Recent Activity</div>
   <div id="history-list" class="history-list"></div>
@@ -239,6 +256,16 @@
 
 <!-- 9. Toast container -->
 <div id="toast-container"></div>
+
+<!-- D-7: Panic-off confirmation dialog -->
+<dialog id="ks-confirm-dialog" class="ks-dialog">
+  <h2 class="ks-dialog-title">Disable kill switch?</h2>
+  <p class="ks-dialog-body">This will allow traffic outside the VPN tunnel. Your IP and DNS may leak until you re-enable the kill switch by reconnecting.</p>
+  <div class="ks-dialog-actions">
+    <button class="btn btn-sm btn-ghost" id="ks-confirm-cancel">Cancel</button>
+    <button class="btn btn-sm btn-danger" id="ks-confirm-ok">Disable</button>
+  </div>
+</dialog>
 
 <script src="js/animations.js"></script>
 <script src="js/engine-monitor.js"></script>
@@ -554,8 +581,131 @@
     }
   });
 
+  // D-2/D-9: Map error codes → actionable messages
+  // Each entry: { title, message, action?: { label, href } }
+  var ERROR_CODE_MAP = {
+    // License error codes
+    expired: {
+      title: 'License expired',
+      message: 'Renew your subscription to reconnect.',
+      action: { label: 'Renew', href: 'https://vizoguard.com/pricing' }
+    },
+    suspended: {
+      title: 'License suspended',
+      message: "Payment couldn't be processed. Update your card to reactivate.",
+      action: { label: 'Manage billing', href: 'https://vizoguard.com/account/billing' }
+    },
+    grace_expired: {
+      title: 'Grace period ended',
+      message: 'Couldn’t verify your license. Connect to the internet, then try again.',
+      action: { label: 'Renew', href: 'https://vizoguard.com/pricing' }
+    },
+    revoked: {
+      title: 'License revoked',
+      message: 'Contact support@vizoguard.com.',
+      action: { label: 'Contact support', href: 'mailto:support@vizoguard.com' }
+    },
+    not_found: {
+      title: 'License not found',
+      message: 'Re-enter your key or contact support.',
+      action: { label: 'Contact support', href: 'mailto:support@vizoguard.com' }
+    },
+    no_license: {
+      title: 'No license key',
+      message: 'Please activate first.',
+      action: null
+    },
+    invalid: {
+      title: 'Invalid license key',
+      message: 'Re-enter your key or contact support.',
+      action: { label: 'Contact support', href: 'mailto:support@vizoguard.com' }
+    },
+    network_error: {
+      title: "Couldn't reach Vizoguard",
+      message: 'Check your internet and try again.',
+      action: null
+    },
+    // D-9: Transport error codes
+    TUN_NOT_LOADED: {
+      title: 'VPN driver not available',
+      message: 'Reinstall the app or grant Network Extension permission in System Settings.',
+      action: null
+    },
+    TUN_PERMISSION_DENIED: {
+      title: 'Permission required',
+      message: 'Grant permission to start the VPN tunnel.',
+      action: null
+    },
+    NDIS_INSTALL_FAILED: {
+      title: 'VPN driver not installed',
+      message: 'Reinstall the app as Administrator.',
+      action: null
+    },
+    NETWORK_UNREACHABLE: {
+      title: "Couldn't reach the VPN server",
+      message: 'Check your internet.',
+      action: null
+    },
+    TIMEOUT: {
+      title: 'Connection timed out',
+      message: 'Try again.',
+      action: null
+    },
+    PROVISION_FAILED: {
+      title: 'VPN credential setup failed',
+      message: "Couldn't set up your credentials. Try again in a moment.",
+      action: { label: 'Contact support', href: 'mailto:support@vizoguard.com' }
+    }
+  };
+
+  function showActionableError(entry) {
+    var container = document.getElementById('toast-container');
+    var prev = container.querySelector('.toast');
+    if (prev) container.removeChild(prev);
+    if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+
+    var toast = document.createElement('div');
+    toast.className = 'toast critical';
+
+    var body = document.createElement('div');
+    body.className = 'toast-body';
+    var titleEl = document.createElement('div');
+    titleEl.className = 'toast-title';
+    titleEl.textContent = entry.title;
+    var msgEl = document.createElement('div');
+    msgEl.className = 'toast-msg';
+    msgEl.textContent = entry.message;
+    body.appendChild(titleEl);
+    body.appendChild(msgEl);
+    toast.appendChild(body);
+
+    if (entry.action && entry.action.label && entry.action.href) {
+      var actionBtn = document.createElement('button');
+      actionBtn.className = 'toast-action';
+      actionBtn.type = 'button';
+      actionBtn.textContent = entry.action.label;
+      actionBtn.onclick = function() {
+        // Use strict-allowlist channel; main process rejects anything else.
+        if (window.vizoguard && window.vizoguard.openExternalAction) {
+          window.vizoguard.openExternalAction(entry.action.href);
+        }
+      };
+      toast.appendChild(actionBtn);
+    }
+
+    var dismissBtn = document.createElement('button');
+    dismissBtn.className = 'toast-dismiss';
+    dismissBtn.textContent = '×';
+    dismissBtn.onclick = function() { dismissToast(toast); };
+    toast.appendChild(dismissBtn);
+
+    toastIsCritical = true;
+    container.appendChild(toast);
+  }
+
   window.vizoguard.onVpnError(function(data) {
-    if (data.code === 'device_mismatch') {
+    var code = data && data.code;
+    if (code === 'device_mismatch') {
       // Show transfer prompt instead of generic error
       var msg = 'This license is active on another device. Move it here?';
       showToast(msg, true);
@@ -573,10 +723,18 @@
           });
         }
       }, 300);
-    } else {
-      showToast('VPN error: ' + data.message, true);
-      setVpnState('error');
+      return;
     }
+
+    if (code && ERROR_CODE_MAP[code]) {
+      showActionableError(ERROR_CODE_MAP[code]);
+      setVpnState('error');
+      return;
+    }
+
+    // Fallback for unknown codes / no code
+    showToast('VPN error: ' + (data && data.message ? data.message : 'Unknown error'), true);
+    setVpnState('error');
   });
 
   window.vizoguard.onThreatBlocked(function(data) {
@@ -606,7 +764,9 @@
   window.vizoguard.onUpdateReady(function() {
     showToast('Update ready \u2014 restart to apply');
     var btn = document.getElementById('update-btn');
-    if (btn) { btn.textContent = 'Restart to update'; btn.disabled = false; btn.onclick = function() { window.vizoguard.installUpdate(); }; }
+    if (btn) { btn.textContent = 'Restart to apply'; btn.disabled = false; btn.onclick = function() { window.vizoguard.installUpdate(); }; }
+    var prog = document.getElementById('update-progress');
+    if (prog) prog.style.display = 'none';
   });
 
   window.vizoguard.onUpdateAvailable(function() {
@@ -625,16 +785,59 @@
     }
   });
 
-  window.vizoguard.onUpdateError(function() {
+  // D-6: Updater error mapping (download / signature / verify / network / unknown)
+  var UPDATE_ERROR_LABELS = {
+    download: 'Download failed',
+    signature: 'Signature check failed',
+    verify: 'Verification failed',
+    network: 'Network error',
+    unknown: 'Check failed'
+  };
+  var UPDATE_ERROR_MESSAGES = {
+    download: "Couldn't download the update. Check your internet and try again.",
+    signature: 'Update was rejected because its code signature didn’t verify. Please reinstall from vizoguard.com.',
+    verify: 'Update could not be verified. Try again or reinstall from vizoguard.com.',
+    network: "Couldn't reach the update server. Check your internet."
+  };
+
+  window.vizoguard.onUpdateError(function(data) {
     var btn = document.getElementById('update-btn');
+    var code = (data && data.code) || 'unknown';
+    var label = UPDATE_ERROR_LABELS[code] || UPDATE_ERROR_LABELS.unknown;
+    var msg = UPDATE_ERROR_MESSAGES[code];
     if (btn) {
-      btn.textContent = 'Check failed';
+      btn.textContent = label;
+      btn.disabled = false;
       setTimeout(function() {
         btn.textContent = 'Check for Updates';
-        btn.disabled = false;
-      }, 3000);
+      }, 4000);
     }
+    if (msg) showToast(msg, true);
+    // Hide progress bar if it was visible
+    var prog = document.getElementById('update-progress');
+    if (prog) prog.style.display = 'none';
   });
+
+  // D-8: Update download progress
+  function _fmtSpeed(bps) {
+    if (!bps || bps <= 0) return '';
+    if (bps >= 1024 * 1024) return (bps / 1024 / 1024).toFixed(1) + ' MB/s';
+    if (bps >= 1024) return (bps / 1024).toFixed(1) + ' KB/s';
+    return Math.round(bps) + ' B/s';
+  }
+  if (window.vizoguard.onUpdateProgress) {
+    window.vizoguard.onUpdateProgress(function(data) {
+      var prog = document.getElementById('update-progress');
+      var fill = document.getElementById('update-progress-fill');
+      var label = document.getElementById('update-progress-label');
+      if (!prog || !fill || !label) return;
+      prog.style.display = '';
+      var pct = Math.max(0, Math.min(100, Math.round(data.percent || 0)));
+      fill.style.width = pct + '%';
+      var speed = _fmtSpeed(data.bytesPerSecond);
+      label.textContent = 'Downloading update — ' + pct + '%' + (speed ? ' · ' + speed : '');
+    });
+  }
 
   window.vizoguard.onSecurityError(function(data) {
     showToast(data.message, true);
@@ -655,6 +858,115 @@
     }
     showToast('Immune: ' + data.type + ' detected on ' + data.file, true);
   });
+
+  // ── D-7: Kill switch status pill + panic-off ─────────────────
+
+  function renderKillSwitchState(state) {
+    var pill = document.getElementById('kill-switch-pill');
+    var dot = document.getElementById('ks-dot');
+    var label = document.getElementById('ks-label');
+    var ksBtn = document.getElementById('ks-off-btn');
+    if (!pill || !dot || !label) return;
+
+    pill.className = 'kill-switch-pill';
+    dot.className = 'ks-dot';
+    if (state && state.error) {
+      pill.classList.add('error');
+      dot.classList.add('error');
+      label.textContent = 'Kill switch error';
+      if (ksBtn) ksBtn.style.display = '';
+    } else if (state && state.active) {
+      pill.classList.add('active');
+      dot.classList.add('active');
+      label.textContent = 'Kill switch active';
+      if (ksBtn) ksBtn.style.display = '';
+    } else {
+      pill.classList.add('off');
+      dot.classList.add('off');
+      label.textContent = 'Kill switch off';
+      if (ksBtn) ksBtn.style.display = 'none';
+    }
+  }
+
+  if (window.vizoguard.onKillSwitchState) {
+    window.vizoguard.onKillSwitchState(function(state) {
+      renderKillSwitchState(state);
+    });
+  }
+
+  function confirmDisableKillSwitch() {
+    var dialog = document.getElementById('ks-confirm-dialog');
+    var ok = document.getElementById('ks-confirm-ok');
+    var cancel = document.getElementById('ks-confirm-cancel');
+    if (!dialog || !ok || !cancel) return;
+
+    var done = false;
+    function cleanup() {
+      ok.onclick = null;
+      cancel.onclick = null;
+    }
+    ok.onclick = function() {
+      if (done) return;
+      done = true;
+      cleanup();
+      try { dialog.close(); } catch (e) {}
+      window.vizoguard.deactivateKillSwitch().then(function(result) {
+        if (result && result.success) {
+          showToast('Kill switch disabled.');
+        } else {
+          showToast('Could not disable kill switch: ' + ((result && result.error) || 'unknown error'), true);
+        }
+      });
+    };
+    cancel.onclick = function() {
+      if (done) return;
+      done = true;
+      cleanup();
+      try { dialog.close(); } catch (e) {}
+    };
+
+    if (typeof dialog.showModal === 'function') {
+      dialog.showModal();
+    } else {
+      // Fallback for older Electron without <dialog>
+      if (window.confirm('This will allow traffic outside the VPN tunnel. Continue?')) {
+        ok.onclick();
+      } else {
+        cancel.onclick();
+      }
+    }
+  }
+
+  // ── D-10: Export diagnostics ──────────────────────────────────
+
+  async function exportDiagnostics() {
+    var btn = document.getElementById('diag-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Exporting...'; }
+    try {
+      var history = await window.vizoguard.getHistory();
+      var result = await window.vizoguard.exportDiagnostics(history || []);
+      if (result && result.success && result.path) {
+        showActionableError({
+          title: 'Diagnostics exported',
+          message: 'Saved to your Downloads folder. Attach this file to a support email.',
+          action: { label: 'Reveal in folder', href: '__reveal__:' + result.path }
+        });
+        // Override the action click — Reveal uses a different IPC
+        var actionBtn = document.querySelector('.toast.critical .toast-action');
+        if (actionBtn) {
+          actionBtn.onclick = function() {
+            window.vizoguard.showItemInFolder(result.path);
+          };
+        }
+      } else {
+        showToast('Diagnostics export failed: ' + ((result && result.error) || 'unknown error'), true);
+      }
+    } catch (e) {
+      showToast('Diagnostics export failed.', true);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Export diagnostics'; }
+    }
+  }
 
   // ── Init ──────────────────────────────────────────────────────
 
@@ -699,6 +1011,14 @@
     // Load weekly stats on init
     loadWeeklyStats();
     loadPrivacyInsights();
+
+    // D-7: Initial kill switch state
+    try {
+      if (window.vizoguard.getKillSwitchStatus) {
+        var ksState = await window.vizoguard.getKillSwitchStatus();
+        renderKillSwitchState(ksState);
+      }
+    } catch (e) { /* non-fatal */ }
 
     // periodic weekly stats refresh (every 5 minutes)
     // eng-threats and eng-connections are updated by 1s engine:subscribe push — no polling needed

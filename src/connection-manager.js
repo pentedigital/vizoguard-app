@@ -29,6 +29,20 @@ class ConnectionManager extends EventEmitter {
     this._reconnectTimer = null;
     this._reconnectInFlight = false; // guards against double-timer race
     this._vpnServerIp = null;
+    // Kill switch UI state — single source of truth, emitted to renderer
+    this._killSwitchState = { active: false, error: null, lastChangeAt: null };
+  }
+
+  // Snapshot of kill switch state for IPC consumers
+  getKillSwitchState() {
+    return Object.assign({}, this._killSwitchState);
+  }
+
+  _setKillSwitchState(patch) {
+    this._killSwitchState = Object.assign({}, this._killSwitchState, patch, {
+      lastChangeAt: new Date().toISOString(),
+    });
+    this.emit("kill-switch:state", this.getKillSwitchState());
   }
 
   get isConnected() {
@@ -137,23 +151,54 @@ class ConnectionManager extends EventEmitter {
   async _activateFirewall() {
     if (!this._firewall || !this._vpnServerIp) return;
     const killSwitchEnabled = this._store.get("killSwitch", true);
-    if (!killSwitchEnabled) return;
+    if (!killSwitchEnabled) {
+      this._setKillSwitchState({ active: false, error: null });
+      return;
+    }
 
     try {
       await this._firewall.activate(this._vpnServerIp);
+      this._setKillSwitchState({ active: true, error: null });
     } catch (e) {
       console.error("Kill switch activation failed:", e.message);
       this.emit("warning", `Kill switch unavailable: ${e.message}`);
+      this._setKillSwitchState({ active: false, error: e.message });
     }
   }
 
   async _deactivateFirewall() {
-    if (!this._firewall || !this._firewall.isActive) return;
+    if (!this._firewall || !this._firewall.isActive) {
+      // Already off — ensure state reflects reality
+      if (this._killSwitchState.active) {
+        this._setKillSwitchState({ active: false, error: null });
+      }
+      return;
+    }
 
     try {
       await this._firewall.deactivate();
+      this._setKillSwitchState({ active: false, error: null });
     } catch (e) {
       console.error("Kill switch deactivation failed:", e.message);
+      this._setKillSwitchState({ active: this._firewall.isActive, error: e.message });
+    }
+  }
+
+  // Panic-off — explicit user request to drop kill switch regardless of VPN state.
+  // Returns { success, error? }. Does NOT disconnect the VPN; if the tunnel is
+  // still alive, traffic continues over it.
+  async deactivateKillSwitch() {
+    if (!this._firewall) return { success: false, error: "Kill switch not available on this platform" };
+    if (!this._killSwitchState.active && !this._firewall.isActive) {
+      return { success: true };
+    }
+    try {
+      await this._firewall.deactivate();
+      this._setKillSwitchState({ active: false, error: null });
+      return { success: true };
+    } catch (e) {
+      this._setKillSwitchState({ active: this._firewall.isActive, error: e.message });
+      return { success: false, error: e.message };
     }
   }
 

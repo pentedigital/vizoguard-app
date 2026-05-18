@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, clipboard, shell, session } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const StoreModule = require("electron-store");
 const Store = StoreModule.default || StoreModule;
 const LicenseManager = require("./src/license");
@@ -14,6 +15,7 @@ const Updater = require("./src/updater");
 const Firewall = require("./src/firewall");
 const { apiCall } = require("./src/api");
 const { shutdownDaemon } = require("./src/elevation");
+const { sanitize } = require("./src/util/sanitize");
 
 // Single instance lock
 if (!app.requestSingleInstanceLock()) {
@@ -333,8 +335,9 @@ connectionManager.on("disconnected", () => {
 
 connectionManager.on("error", (err) => {
   const safeMsg = (err.message || "VPN error").replace(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?/g, "[redacted]");
-  logConnection('error', { message: safeMsg });
-  sendToRenderer("vpn:error", { message: safeMsg });
+  const code = err && err.code ? err.code : undefined;
+  logConnection('error', code ? { message: safeMsg, code } : { message: safeMsg });
+  sendToRenderer("vpn:error", code ? { message: safeMsg, code } : { message: safeMsg });
 });
 
 connectionManager.on("reconnecting", (info) => {
@@ -348,6 +351,11 @@ connectionManager.on("reconnected", () => {
 connectionManager.on("reconnect-failed", () => {
   sendToRenderer("vpn:error", { message: "Unable to reconnect after multiple attempts. Please reconnect manually." });
   sendToRenderer("vpn:state", { connected: false, reconnecting: false });
+});
+
+// D-7: Broadcast kill switch state changes
+connectionManager.on("kill-switch:state", (state) => {
+  sendToRenderer("kill-switch:state", state);
 });
 
 // ── Updater Events ────────────────────────────
@@ -364,9 +372,144 @@ updater.on("available", (info) => {
   sendToRenderer("update:available", { version: info.version });
 });
 
-updater.on("error", (err) => {
-  sendToRenderer("update:error", { message: err.message });
+updater.on("error", (err, code) => {
+  // D-6: surface error code so renderer can show a tailored message
+  const safe = (err && err.message ? err.message : "Update failed");
+  sendToRenderer("update:error", { message: safe, code: code || (err && err.code) || "unknown" });
 });
+
+// D-8: forward download progress to renderer
+updater.on("progress", (progress) => {
+  sendToRenderer("update:progress", {
+    percent: typeof progress.percent === "number" ? progress.percent : 0,
+    bytesPerSecond: progress.bytesPerSecond || 0,
+    transferred: progress.transferred || 0,
+    total: progress.total || 0,
+  });
+});
+
+// ── Diagnostics ───────────────────────────────
+
+// Redact PII from diagnostic content. Layered on top of util/sanitize.
+function redactDiagnostic(str) {
+  if (typeof str !== "string") return str;
+  // Apply existing sanitize patterns (license keys, ss://, vless://, UUIDs, IPs, hashes)
+  let out = sanitize(str);
+  // Strip email addresses
+  out = out.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, (m) => {
+    return m === "support@vizoguard.com" ? m : "[EMAIL_REDACTED]";
+  });
+  return out;
+}
+
+async function buildDiagnosticsBundle(payload) {
+  const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const downloadsDir = app.getPath("downloads");
+  const outPath = path.join(downloadsDir, `Vizoguard-Diagnostics-${ts}.txt`);
+
+  const parts = [];
+  parts.push("Vizoguard Diagnostics Bundle");
+  parts.push(`Generated: ${new Date().toISOString()}`);
+  parts.push("");
+  parts.push("=== App ===");
+  parts.push(`Version: ${app.getVersion()}`);
+  parts.push(`Electron: ${process.versions.electron || "n/a"}`);
+  parts.push(`Node: ${process.versions.node}`);
+  parts.push(`Packaged: ${app.isPackaged}`);
+  parts.push("");
+  parts.push("=== OS ===");
+  parts.push(`Platform: ${process.platform} (${os.release()})`);
+  parts.push(`Arch: ${process.arch}`);
+  parts.push(`CPU model: ${(os.cpus()[0] && os.cpus()[0].model) || "unknown"}`);
+  parts.push(`CPUs: ${os.cpus().length}`);
+  parts.push(`Memory: ${Math.round(os.totalmem() / 1024 / 1024)} MB total, ${Math.round(os.freemem() / 1024 / 1024)} MB free`);
+  parts.push(`Uptime: ${Math.round(os.uptime())} s`);
+  parts.push(`Locale: ${app.getLocale && app.getLocale()}`);
+  parts.push("");
+  parts.push("=== VPN ===");
+  parts.push(`Connected: ${connectionManager.isConnected}`);
+  parts.push(`Active mode: ${connectionManager.activeMode || "none"}`);
+  parts.push(`Reconnecting: ${connectionManager.isReconnecting}`);
+  parts.push("");
+  parts.push("=== Kill Switch ===");
+  const ks = connectionManager.getKillSwitchState();
+  parts.push(`Active: ${ks.active}`);
+  parts.push(`Error: ${ks.error || "none"}`);
+  parts.push(`Last change: ${ks.lastChangeAt || "n/a"}`);
+  parts.push("");
+  parts.push("=== Updater ===");
+  parts.push(`Verified update ready: ${updater._verifiedUpdateInfo ? updater._verifiedUpdateInfo.version : "no"}`);
+  parts.push("");
+  parts.push("=== Engine Metrics (snapshot) ===");
+  try {
+    const m = flattenEngineMetrics();
+    parts.push(`Threats blocked: ${m.threatsBlocked}`);
+    parts.push(`Requests/sec: ${m.requestsPerSec}`);
+    parts.push(`Cached entries: ${m.cachedEntries}`);
+    parts.push(`Active connections: ${m.activeConnections}`);
+    parts.push(`Cipher: ${m.cipher}`);
+    parts.push(`IP masked: ${m.ipMasked}`);
+    parts.push(`DNS encrypted: ${m.dnsEncrypted}`);
+    parts.push(`Uptime: ${m.uptime}s`);
+  } catch (e) {
+    parts.push(`(error reading metrics: ${e.message})`);
+  }
+  parts.push("");
+  parts.push("=== Connection History (last 100, local) ===");
+  const history = store.get("connectionHistory", []);
+  // Allow the renderer to override / supplement, but trust persisted history first
+  const overrideHistory = Array.isArray(payload && payload.history) ? payload.history : null;
+  const finalHistory = overrideHistory && overrideHistory.length > history.length ? overrideHistory : history;
+  for (const entry of finalHistory.slice(-100)) {
+    const line = `${entry.timestamp || "?"}  ${entry.action || "?"}  ${redactDiagnostic(JSON.stringify({
+      mode: entry.mode,
+      url: entry.url,
+      risk: entry.risk,
+      duration: entry.duration,
+      message: entry.message,
+      code: entry.code,
+    }))}`;
+    parts.push(line);
+  }
+  parts.push("");
+  parts.push("=== Weekly Stats ===");
+  const ws = store.get("weeklyStats", {});
+  parts.push(`Threats: ${ws.threats || 0}`);
+  parts.push(`Connections: ${ws.connections || 0}`);
+  parts.push(`Time protected (s): ${ws.timeProtected || 0}`);
+  parts.push("");
+
+  // Tail of app logs (if Electron exposes them)
+  try {
+    const logsPath = app.getPath("logs");
+    if (logsPath && fs.existsSync(logsPath)) {
+      const files = fs.readdirSync(logsPath).filter(f => /\.log$/i.test(f));
+      parts.push("=== Recent App Logs (tail per file, redacted) ===");
+      for (const f of files) {
+        const full = path.join(logsPath, f);
+        try {
+          const stat = fs.statSync(full);
+          if (!stat.isFile()) continue;
+          parts.push(`--- ${f} (${stat.size} bytes) ---`);
+          const data = fs.readFileSync(full, "utf8");
+          const lines = data.split("\n").slice(-1000);
+          parts.push(redactDiagnostic(lines.join("\n")));
+        } catch (e) {
+          parts.push(`(could not read ${f}: ${e.message})`);
+        }
+      }
+    } else {
+      parts.push("=== Recent App Logs ===");
+      parts.push("(no logs directory)");
+    }
+  } catch (e) {
+    parts.push(`(log gather failed: ${e.message})`);
+  }
+
+  const content = redactDiagnostic(parts.join("\n"));
+  fs.writeFileSync(outPath, content, "utf8");
+  return { path: outPath };
+}
 
 // ── IPC Handlers ──────────────────────────────
 
@@ -454,9 +597,11 @@ ipcMain.handle("vpn:connect", async () => {
   } catch (err) {
     // Surface tunnel/connection errors to the UI (vpnConnect() return value is often ignored)
     const safeMsg = (err.message || "VPN error").replace(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?/g, "[redacted]");
-    sendToRenderer("vpn:error", { message: safeMsg });
+    // D-9: forward transport error code so renderer can map to actionable message
+    const code = err && err.code ? err.code : undefined;
+    sendToRenderer("vpn:error", code ? { message: safeMsg, code } : { message: safeMsg });
     sendToRenderer("vpn:state", { connected: false });
-    return { success: false, error: safeMsg };
+    return { success: false, error: safeMsg, code };
   } finally {
     _vpnConnecting = false;
   }
@@ -521,15 +666,97 @@ ipcMain.handle("app:openExternal", (_event, url) => {
   // Only allow exact support mailto
   if (url === "mailto:support@vizoguard.com") {
     shell.openExternal(url);
-    return;
+    return { success: true };
   }
   try {
     const parsed = new URL(url);
     const allowedHosts = ["vizoguard.com", "www.vizoguard.com", "getoutline.org", "www.getoutline.org"];
     if (parsed.protocol === "https:" && allowedHosts.includes(parsed.hostname)) {
       shell.openExternal(url);
+      return { success: true };
     }
   } catch {}
+  return { success: false, error: "URL not allowed" };
+});
+
+// D-2: dedicated open handler used by the license-error action buttons.
+// Strict allowlist — only specific vizoguard.com paths and the support mailto.
+const EXTERNAL_ALLOWLIST = new Set([
+  "https://vizoguard.com/pricing",
+  "https://vizoguard.com/account",
+  "https://vizoguard.com/billing",
+  "https://vizoguard.com/account/billing",
+  "https://vizoguard.com/support",
+  "https://vizoguard.com/contact",
+  "https://www.vizoguard.com/pricing",
+  "https://www.vizoguard.com/account",
+  "https://www.vizoguard.com/billing",
+  "https://www.vizoguard.com/account/billing",
+  "https://www.vizoguard.com/support",
+  "https://www.vizoguard.com/contact",
+  "mailto:support@vizoguard.com",
+]);
+
+ipcMain.handle("external:open", (_event, url) => {
+  if (typeof url !== "string" || url.length > 256) {
+    return { success: false, error: "Invalid URL" };
+  }
+  if (!EXTERNAL_ALLOWLIST.has(url)) {
+    console.warn("Blocked external:open for non-allowlisted URL");
+    return { success: false, error: "URL not allowed" };
+  }
+  try {
+    shell.openExternal(url);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: "Failed to open" };
+  }
+});
+
+// D-7: Kill switch IPC
+ipcMain.handle("kill-switch:status", () => {
+  return connectionManager.getKillSwitchState();
+});
+
+ipcMain.handle("kill-switch:deactivate", async () => {
+  return connectionManager.deactivateKillSwitch();
+});
+
+// D-10: Export diagnostics bundle (plain text — avoids adding a zip dependency)
+ipcMain.handle("diagnostics:export", async (_event, payload) => {
+  try {
+    const result = await buildDiagnosticsBundle(payload);
+    return { success: true, path: result.path };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// D-10: reveal file in OS file manager (only for files inside app downloads dir)
+// Use path.relative to defeat the "/Downloads-evil/file" containment bypass
+// that startsWith() alone allows (e.g. downloadsDir = "/u/Downloads" matches
+// "/u/DownloadsEvil/x"). path.relative + the !startsWith("..") guard is the
+// canonical safe-containment check on Node.
+ipcMain.handle("shell:showItemInFolder", (_event, fullPath) => {
+  if (typeof fullPath !== "string" || fullPath.length === 0 || fullPath.length > 1024) {
+    return { success: false, error: "Invalid path" };
+  }
+  const downloadsDir = path.resolve(app.getPath("downloads"));
+  const resolved = path.resolve(downloadsDir, fullPath);
+  const rel = path.relative(downloadsDir, resolved);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+    return { success: false, error: "Path outside downloads" };
+  }
+  // Restrict to plain files we generated (must be a diagnostics bundle filename)
+  if (!path.basename(resolved).startsWith("Vizoguard-Diagnostics-")) {
+    return { success: false, error: "Not a diagnostics bundle" };
+  }
+  try {
+    shell.showItemInFolder(resolved);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 });
 
 ipcMain.handle("app:quit", () => trayCallbacks.quit());

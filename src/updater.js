@@ -47,14 +47,14 @@ class Updater extends EventEmitter {
       // SECURITY: Validate version to prevent downgrade attacks
       if (!this._isVersionAllowed(info.version)) {
         console.error(`Update rejected: version ${info.version} is below minimum ${MINIMUM_VERSION}`);
-        this.emit("error", new Error("Update version rejected (downgrade protection)"));
+        this._emitError(new Error("Update version rejected (downgrade protection)"), "verify");
         return;
       }
       this.emit("available", info);
       // Manually download so we can verify
       autoUpdater.downloadUpdate().catch((err) => {
         console.error("Download failed:", err.message);
-        this.emit("error", err);
+        this._emitError(err, "download");
       });
     });
 
@@ -63,6 +63,7 @@ class Updater extends EventEmitter {
     });
 
     autoUpdater.on("download-progress", (progress) => {
+      // progress: { percent, bytesPerSecond, transferred, total }
       this.emit("progress", progress);
     });
 
@@ -76,18 +77,54 @@ class Updater extends EventEmitter {
           this.emit("downloaded", info);
         } else {
           console.error("Update signature verification failed - rejecting update");
-          this.emit("error", new Error("Code signature verification failed"));
+          this._emitError(new Error("Code signature verification failed"), "signature");
         }
       } catch (err) {
         console.error("Update verification error:", err.message);
-        this.emit("error", err);
+        this._emitError(err, "verify");
       }
     });
 
     autoUpdater.on("error", (err) => {
       console.error("Update error:", err.message);
-      this.emit("error", err);
+      this._emitError(err);
     });
+  }
+
+  /**
+   * Classify an updater error into one of:
+   *  - download   network/HTTP failure pulling the update package
+   *  - signature  code signature mismatch / pinning failure
+   *  - verify     signature pipeline broke (codesign/powershell crashed) or downgrade
+   *  - network    connectivity issue checking for updates
+   *  - unknown    fallback
+   */
+  _classifyError(err, hint) {
+    if (hint) return hint;
+    const msg = String(err && err.message || err || "").toLowerCase();
+    if (/signature|codesign|authenticode|certificate.*(?:not.*match|mismatch|reject)|cert hash/i.test(msg)) {
+      return "signature";
+    }
+    if (/net::err_|enotfound|enetunreach|ehostunreach|eai_again|getaddrinfo|cannot resolve/i.test(msg)) {
+      return "network";
+    }
+    if (/etimedout|econnreset|econnrefused|socket hang up/i.test(msg)) {
+      return "network";
+    }
+    if (/cannot find|404|403|access denied|forbidden|http.*4\d\d|http.*5\d\d|download.*fail|read econnreset/i.test(msg)) {
+      return "download";
+    }
+    if (/cannot install unverified|verification|downgrade/i.test(msg)) {
+      return "verify";
+    }
+    return "unknown";
+  }
+
+  _emitError(err, hint) {
+    const code = this._classifyError(err, hint);
+    // Attach code on the error object so any legacy listeners can use it
+    try { err.code = code; } catch {}
+    this.emit("error", err, code);
   }
 
   /**
@@ -232,11 +269,11 @@ class Updater extends EventEmitter {
     try {
       autoUpdater.checkForUpdates().catch((err) => {
         console.error("Update check failed:", err.message);
-        this.emit("error", err);
+        this._emitError(err, "network");
       });
     } catch (err) {
       console.error("Update check failed:", err.message);
-      this.emit("error", err);
+      this._emitError(err, "network");
     }
   }
 
@@ -244,7 +281,7 @@ class Updater extends EventEmitter {
     // SECURITY: Only install if verification passed
     if (!this._verifiedUpdateInfo) {
       console.error("Install rejected: update was not verified");
-      this.emit("error", new Error("Cannot install unverified update"));
+      this._emitError(new Error("Cannot install unverified update"), "verify");
       return;
     }
     autoUpdater.quitAndInstall();
