@@ -5,50 +5,52 @@ No implementation requested by Meddie may be deferred, skipped, postponed,
 ignored, downgraded, or left incomplete, except for Dark Mode. Tests must
 pass because the implementation is correct, not because tests were modified.
 
-## ⚠️ Open Blocker: Signed Mac DMG cannot be built from Linux VPS
+## ⚠️ Open Blocker: Signed Mac DMG / Windows EXE
 
-**Affected files / artifacts:**
-- `electron-builder.yml` (already configured for macOS signing)
-- `build/entitlements.mac.plist` (entitlements ready)
-- `package.json` `"build:mac"` script (`electron-builder --mac`)
-- Distribution target: `/var/www/vizoguard/downloads/Vizoguard-latest.dmg`
-  (symlink) + `latest-mac.yml` (electron-updater feed)
+**Status:** CI is in place; only awaiting GitHub Secrets to be populated.
 
-**Reason:** macOS DMG signing requires the host machine to be macOS with:
-- An installed Apple Developer ID Application certificate
-  (Keychain: "Developer ID Application: PRIME360 HOLDING LTD (TEAM_ID)")
-- Network access to Apple's notarization service
-  (`xcrun notarytool submit --wait`)
-- `codesign` (Xcode CLT) — Linux/Wine cannot produce a valid Apple signature
+**Infrastructure already shipped:**
+- `electron-builder.yml` configured for macOS + Windows signing
+- `build/entitlements.mac.plist` entitlements ready
+- `.github/workflows/build.yml` — runs `build-mac` on `macos-latest` and
+  `build-win` on `windows-latest` automatically on every push to `main`
+  and every `v*` tag. Gracefully no-ops signing when secrets are absent
+  (produces an unsigned build for inspection).
+- `scripts/download-latest-build.sh` — VPS-side helper that pulls signed
+  artifacts from a successful GitHub Actions run and installs them into
+  `/var/www/vizoguard/downloads/` with the correct symlinks. Needed
+  because Hostinger blocks GitHub runner IPs from SSHing into the VPS,
+  so the deploy job's SCP can't reach us — the VPS pulls instead.
 
-This VPS is Ubuntu and lacks both `codesign` and any Apple-issued cert.
-Cross-signing from Linux produces an unsigned DMG that Gatekeeper rejects
-with "Vizoguard.app is damaged."
-
-**Specific action required to resolve (in this order):**
-1. On a macOS machine with the developer cert installed:
+**What's still missing (the actual blocker):**
+1. GitHub repository Secrets for Mac signing:
+   - `MAC_CERTIFICATE_P12_BASE64` — base64-encoded Developer ID
+     Application .p12 (`base64 -w 0 < cert.p12`)
+   - `MAC_CERTIFICATE_PASSWORD` — the .p12 password
+   - `APPLE_ID` — Apple Developer account email
+   - `APPLE_APP_SPECIFIC_PASSWORD` — generated at appleid.apple.com
+   - `APPLE_TEAM_ID` — 10-char team identifier
+2. GitHub repository Secrets for Windows signing (optional, separate cert):
+   - `WIN_CERTIFICATE_P12_BASE64` — base64-encoded code-signing .p12
+   - `WIN_CERTIFICATE_PASSWORD`
+3. After secrets are populated:
    ```
-   git clone https://github.com/pentedigital/vizoguard-app
-   cd vizoguard-app && npm ci
-   export APPLE_ID="<account email>"
-   export APPLE_APP_SPECIFIC_PASSWORD="<app password from appleid.apple.com>"
-   export APPLE_TEAM_ID="<10-char team id>"
-   npm run build:mac    # produces dist/Vizoguard-<v>.dmg + .blockmap
+   # On a developer machine:
+   git tag v1.3.5 && git push origin v1.3.5
+   # Wait ~15 min for the macOS + Windows build jobs in GitHub Actions.
+   # Then on the VPS:
+   /root/vizoguard-app/scripts/download-latest-build.sh
    ```
-2. After notarization completes, scp the produced artifacts to the VPS:
-   ```
-   scp dist/Vizoguard-1.3.5.dmg  dist/Vizoguard-1.3.5-arm64.dmg \
-       dist/latest-mac.yml dist/*.blockmap \
-       root@vizoguard.com:/var/www/vizoguard/downloads/
-   ```
-3. Update the latest-DMG symlink on the VPS:
-   `cd /var/www/vizoguard/downloads && ln -sf Vizoguard-1.3.5.dmg Vizoguard-latest.dmg`
-4. The auto-updater detects the new version via `latest-mac.yml` and
-   prompts installed clients to update — no further action.
+4. `latest-mac.yml` + `latest.yml` are auto-updater feeds; the
+   download script copies them so installed clients pick up the new
+   version via electron-updater within 24 h.
 
-**Windows .exe** build is similarly blocked unless either (a) you run
-`build:win` on a Windows host with a code-signing cert, or (b) you use a
-Linux-compatible signing service like `osslsigncode` with a purchased cert.
+**Why this can't be done from the VPS:**
+- `codesign` and `notarytool` are macOS-only (Xcode CLT). Cross-signing
+  from Linux/Wine produces an unsigned DMG that Gatekeeper rejects
+  with "Vizoguard.app is damaged."
+- The Apple Developer ID cert can't be exported through CI without the
+  .p12 + password as secrets — which only the repo owner can set.
 
 ## Stack
 - Electron app (`main.js` entry, `preload.js` bridge)
