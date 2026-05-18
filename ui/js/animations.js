@@ -14,6 +14,7 @@ var _connectedSince  = null;
 var _errorClearTimer = null;
 var _engineExpanded  = false;
 var _engineObserver  = null;
+var _connectTimeoutTimer = null;
 
 /* ── DOM helpers ──────────────────────────────────────────── */
 
@@ -164,6 +165,20 @@ function setVpnState(newState) {
       _errorClearTimer = null;
     }
   }
+
+  // -- Connect safety timeout (30s) — clear on any transition out of connecting
+  if (_connectTimeoutTimer) {
+    clearTimeout(_connectTimeoutTimer);
+    _connectTimeoutTimer = null;
+  }
+  if (newState === 'connecting') {
+    _connectTimeoutTimer = setTimeout(function() {
+      _connectTimeoutTimer = null;
+      if (_currentVpnState === 'connecting') {
+        setVpnState('error', { message: 'Connection timed out — please try again' });
+      }
+    }, 30000);
+  }
 }
 
 /* ── updatePrivacyScore(state) ───────────────────────────── */
@@ -263,7 +278,7 @@ function stopTimer() {
     var btn = _el('connect-btn');
     if (!btn) return;
 
-    btn.addEventListener('click', function() {
+    function handleActivate() {
       var state = _currentVpnState;
 
       // Ignore clicks while transitioning
@@ -287,6 +302,17 @@ function stopTimer() {
         }).catch(function() {
           setVpnState('error');
         });
+      }
+    }
+
+    btn.addEventListener('click', handleActivate);
+
+    // Keyboard activation — connect-btn is a <div>, not a real button,
+    // so it doesn't get Space/Enter for free. Make it keyboard-accessible.
+    btn.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        handleActivate();
       }
     });
   }

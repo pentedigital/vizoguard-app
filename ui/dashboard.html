@@ -44,7 +44,7 @@
 
 <!-- 3. Connect button area -->
 <div class="connect-area">
-  <div class="connect-btn idle" id="connect-btn">
+  <div class="connect-btn idle" id="connect-btn" role="button" tabindex="0" aria-label="Connect or disconnect VPN">
     <div class="connect-ring" id="connect-ring"></div>
     <span class="connect-text" id="connect-text">Connect</span>
   </div>
@@ -374,6 +374,15 @@
     if (settingsEasterCount >= 5) {
       settingsEasterCount = 0;
       showToast('You found the easter egg!');
+    }
+  });
+
+  // Close settings panel on Escape (a11y)
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape') return;
+    var panel = document.getElementById('settings-panel');
+    if (panel && panel.classList.contains('open')) {
+      toggleSettings();
     }
   });
 

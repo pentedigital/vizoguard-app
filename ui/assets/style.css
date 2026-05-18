@@ -814,6 +814,15 @@ a:hover { opacity: 0.8; }
   outline: none;
 }
 
+/* Restore visible keyboard focus rings (a11y) — only on keyboard nav */
+.connect-btn:focus-visible,
+.btn:focus-visible,
+.settings-btn:focus-visible,
+.activate-card input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .expired-card { border-color: var(--red); }
 
 /* ── Global Transitions on Interactive Elements ────────────── */
