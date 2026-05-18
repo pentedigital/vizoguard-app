@@ -65,6 +65,10 @@ pass because the implementation is correct, not because tests were modified.
 - Persistent storage: `electron-store` (user preferences, license data)
 - System tray: `src/tray.js`
 - UI: `ui/` — dashboard, activate, expired pages
+- Transport-error classifier: `src/util/transport-errors.js` — regex-tags low-level connection failures to `TUN_NOT_LOADED` / `TUN_PERMISSION_DENIED` / `NDIS_INSTALL_FAILED` / `NETWORK_UNREACHABLE` / `TIMEOUT` / `PROVISION_FAILED` / `UNKNOWN`. Renderer maps each code to an actionable toast (`ERROR_CODE_MAP` in `dashboard.html`)
+- Diagnostics export: `main.js buildDiagnosticsBundle()` — redacted plain-text bundle written to `app.getPath('downloads')`; `redactDiagnostic()` strips license keys, ss://, vless://, UUIDs, IPs, emails. `shell:showItemInFolder` IPC uses `path.relative` containment + `Vizoguard-Diagnostics-` basename guard so it can only reveal our own files
+- Kill-switch UI: status pill in `dashboard.html` (teal=active / red=error / gray=off) + `<dialog>` panic-off confirmation. IPC channels `kill-switch:state` (broadcast), `kill-switch:status`, `kill-switch:deactivate`
+- Updater UX: progress bar in `dashboard.html` driven by `update:progress` IPC with bytes/sec; tailored error toasts via `_classifyError` → `download` / `signature` / `verify` / `network` / `unknown`
 - Build config: `electron-builder.yml`
 - Entitlements: `build/entitlements.mac.plist` (macOS code signing)
 - CI/CD: `.github/workflows/build.yml`
@@ -147,7 +151,8 @@ pass because the implementation is correct, not because tests were modified.
 
 ## Deploy
 - Push to `main` triggers GitHub Actions: builds Mac DMG + Win EXE (deploy step fails — Hostinger blocks GitHub IPs)
-- Manual deploy: `gh run download <RUN_ID> --repo pentedigital/vizoguard-app -D /tmp/build && cp /tmp/build/mac-dmg/*.dmg /var/www/vizoguard/downloads/ && cp /tmp/build/win-exe/*.exe /var/www/vizoguard/downloads/`
+- Manual deploy (preferred): run `/root/vizoguard-app/scripts/download-latest-build.sh` on the VPS — pulls signed artifacts from the latest successful build via `gh run download`, copies into `/var/www/vizoguard/downloads/`, fixes up `Vizoguard-latest.{dmg,exe}` symlinks, and lays down `latest-mac.yml`/`latest.yml` for the electron-updater feed
+- Manual deploy (fallback): `gh run download <RUN_ID> --repo pentedigital/vizoguard-app -D /tmp/build && cp /tmp/build/mac-dmg/*.dmg /var/www/vizoguard/downloads/ && cp /tmp/build/win-exe/*.exe /var/www/vizoguard/downloads/`
 - Installers served at `vizoguard.com/downloads/Vizoguard-latest.dmg` and `.exe`
 - Deploy SSH key: ed25519, stored as `VPS_SSH_PRIVATE_KEY` GitHub secret
 
@@ -187,7 +192,7 @@ Apps will show:
 - `app:openExternal`, `app:minimize`, `app:close` — window controls
 
 ## Testing
-- Run all: `node --test test/*.test.js` — 264 tests, Node built-in test runner
+- Run all: `node --test test/*.test.js` — 274 tests, Node built-in test runner
 - Core tests: `test/core/` — mirrors `src/core/` structure, uses jest (`npx jest test/core/<module>.test.js`)
 - Transport/route/DNS tests: `test/*.test.js` — dns, routes, obfuscated transport
 - Critical path tests: `test/license.test.js` (29 tests), `test/api.test.js` (12 tests), `test/threat-checker.test.js` (24 tests), `test/connection-manager.test.js` (15 tests)
